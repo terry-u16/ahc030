@@ -1,7 +1,8 @@
 use itertools::Itertools;
 use rand::{seq::SliceRandom as _, Rng};
+use rand_distr::{Distribution, WeightedAliasIndex};
 use rand_pcg::Pcg64Mcg;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     common::ChangeMinMax,
@@ -36,13 +37,13 @@ pub fn solve(mut judge: Judge, input: &Input) {
         );
 
         let solutions = climbing(&env, state, each_duration);
-        let candidates_len = solutions.len() / input.dup_mul;
+        let candidates_len = solutions.len();
         eprintln!("turn: {}, solutions: {}", turn, candidates_len);
 
         let solutions = solutions.into_iter().collect_vec();
         color_map(&solutions, &mut rng, &env, input, candidates_len, &judge);
 
-        if solutions.len() % input.dup_mul == 0 && candidates_len == 1 {
+        if candidates_len == 1 {
             let solution = solutions.iter().next().unwrap();
             let solution = State::new(solution.clone(), env.map.clone(), input);
 
@@ -197,11 +198,14 @@ impl State {
             violations += v.abs();
         }
 
-        Self {
+        let mut state = Self {
             shift,
             violations,
             map,
-        }
+        };
+
+        state.normalize(input);
+        state
     }
 
     fn neigh(&self, input: &Input, rng: &mut impl Rng, choose_cnt: usize) -> Self {
@@ -292,7 +296,31 @@ impl State {
             state.violations += best_violation;
         }
 
+        state.normalize(input);
+
         state
+    }
+
+    fn normalize(&mut self, input: &Input) {
+        let mut groups = FxHashMap::default();
+
+        for (i, (oil, shift)) in input.oils.iter().zip(&self.shift).enumerate() {
+            let entry = groups.entry(&oil.pos).or_insert_with(|| vec![]);
+            entry.push((i, shift));
+        }
+
+        let mut new_shift = vec![CoordDiff::new(0, 0); input.oil_count];
+
+        for group in groups.values() {
+            let mut shifts = group.iter().map(|&(_, shift)| shift).collect_vec();
+            shifts.sort_unstable();
+
+            for (i, shift) in group.iter().map(|&(i, _)| i).zip(shifts) {
+                new_shift[i] = *shift;
+            }
+        }
+
+        self.shift = new_shift;
     }
 
     fn calc_score(&self) -> i32 {
@@ -338,6 +366,8 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
+    let oil_count_dist = WeightedAliasIndex::new(vec![10, 70, 20]).unwrap();
+
     loop {
         all_iter += 1;
         if (all_iter & ((1 << 4) - 1)) == 0 {
@@ -349,11 +379,7 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
         }
 
         // 変形
-        let oil_count = if rng.gen_bool(0.8) {
-            2
-        } else {
-            3.min(env.input.oil_count)
-        };
+        let oil_count = (oil_count_dist.sample(&mut rng) + 1).min(env.input.oil_count);
         let new_solution = solution.neigh(&env.input, &mut rng, oil_count);
 
         // スコア計算

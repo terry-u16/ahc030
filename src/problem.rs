@@ -13,7 +13,6 @@ pub struct Input {
     pub oil_count: usize,
     pub eps: f64,
     pub oils: Vec<Oils>,
-    pub dup_mul: usize,
 }
 
 impl Input {
@@ -25,20 +24,11 @@ impl Input {
             *entry += 1;
         }
 
-        let mut dup_mul = 1;
-
-        for &c in counts.values() {
-            for i in 1..=c {
-                dup_mul *= i;
-            }
-        }
-
         Self {
             map_size,
             oil_count,
             eps,
             oils,
-            dup_mul,
         }
     }
 }
