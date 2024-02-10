@@ -14,9 +14,10 @@ pub fn solve(mut judge: Judge, input: &Input) {
     let mut rng = Pcg64Mcg::new(42);
 
     let each_duration = 2.0 / (input.map_size * input.map_size) as f64;
+    let mut next_pos = None;
 
     for turn in 0..input.map_size * input.map_size {
-        let coord = loop {
+        let coord = next_pos.take().unwrap_or_else(|| loop {
             let row = rng.gen_range(0..input.map_size);
             let col = rng.gen_range(0..input.map_size);
             let c = Coord::new(row, col);
@@ -24,7 +25,7 @@ pub fn solve(mut judge: Judge, input: &Input) {
             if env.map[c].is_none() {
                 break c;
             }
-        };
+        });
 
         env.map[coord] = Some(judge.query_single(coord));
 
@@ -42,7 +43,7 @@ pub fn solve(mut judge: Judge, input: &Input) {
         let candidates_len = solutions.len() / input.dup_mul;
         eprintln!("turn: {}, solutions: {}", turn, candidates_len);
 
-        if candidates_len == 1 {
+        if solutions.len() % input.dup_mul == 0 && candidates_len == 1 {
             let solution = solutions.iter().next().unwrap();
             let solution = State::new(solution.clone(), env.map.clone(), input);
 
@@ -71,8 +72,49 @@ pub fn solve(mut judge: Judge, input: &Input) {
                 candidates_len
             ));
             judge.comment_colors(&colors);
+
+            if solutions.len() >= 2 {
+                let mut map = Map2d::new_with(0, input.map_size);
+
+                for shifts in solutions.choose_multiple(&mut rng, 2) {
+                    for (&shift, oil) in shifts.iter().zip(input.oils.iter()) {
+                        for &p in oil.pos.iter() {
+                            let p = p + shift;
+
+                            map[p] += 1;
+                        }
+                    }
+                }
+
+                let mut candidates = vec![];
+
+                for row in 0..input.map_size {
+                    for col in 0..input.map_size {
+                        let c = Coord::new(row, col);
+                        if map[c] % 2 == 1 && env.map[c].is_none() {
+                            candidates.push(c);
+                        }
+                    }
+                }
+
+                next_pos = candidates.choose(&mut rng).copied();
+            }
         }
     }
+
+    let mut answer = vec![];
+
+    for row in 0..input.map_size {
+        for col in 0..input.map_size {
+            let c = Coord::new(row, col);
+
+            if env.map[c].unwrap() > 0 {
+                answer.push(c);
+            }
+        }
+    }
+
+    judge.answer(&answer).unwrap();
 }
 
 #[derive(Debug, Clone)]
@@ -268,7 +310,11 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
         }
 
         // 変形
-        let oil_count = 2;
+        let oil_count = if rng.gen_bool(0.8) {
+            2
+        } else {
+            3.min(env.input.oil_count)
+        };
         let new_solution = solution.neigh(&env.input, &mut rng, oil_count);
 
         // スコア計算
