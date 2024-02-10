@@ -85,7 +85,7 @@ fn choose_next_pos(
     env: &Env<'_>,
 ) -> Option<Coord> {
     let mut maps = vec![];
-    let solutions = solutions.choose_multiple(rng, 50.min(solutions.len()));
+    let solutions = solutions.choose_multiple(rng, 100.min(solutions.len()));
 
     for shifts in solutions {
         let mut map = Map2d::new_with(0, input.map_size);
@@ -101,18 +101,23 @@ fn choose_next_pos(
         maps.push(map);
     }
 
-    let mut diffs = Map2d::new_with(0, input.map_size);
+    let max_v = maps
+        .iter()
+        .flat_map(|m| m.iter())
+        .max()
+        .copied()
+        .unwrap_or(0) as usize;
 
-    for i in 0..maps.len() {
-        for j in i + 1..maps.len() {
-            for ((v0, v1), diff) in maps[i].iter().zip(maps[j].iter()).zip(diffs.iter_mut()) {
-                *diff += (v0 != v1) as u32;
-            }
+    let mut counts = Map2d::new_with(vec![0; max_v + 1], input.map_size);
+
+    for map in maps.iter() {
+        for (&m, cnt) in map.iter().zip(counts.iter_mut()) {
+            cnt[m as usize] += 1;
         }
     }
 
     let mut candidates = vec![];
-    let mut max_diff = 0;
+    let mut best_count = usize::MAX;
 
     for row in 0..input.map_size {
         for col in 0..input.map_size {
@@ -122,11 +127,13 @@ fn choose_next_pos(
                 continue;
             }
 
-            if max_diff.change_max(diffs[c]) {
+            let max = counts[c].iter().max().copied().unwrap();
+
+            if best_count.change_min(max) {
                 candidates.clear();
             }
 
-            if diffs[c] == max_diff {
+            if best_count == max {
                 candidates.push(c);
             }
         }
