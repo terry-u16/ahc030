@@ -1,6 +1,7 @@
 {
     "rust-analyzer.linkedProjects": [
         ".\\Cargo.toml",
-        ".\\tools\\Cargo.toml"
+        ".\\tools\\Cargo.toml",
+        ".\\relative_score\\Cargo.toml"
     ]
 }
