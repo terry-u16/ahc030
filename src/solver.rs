@@ -35,6 +35,7 @@ pub fn solve(mut judge: Judge, input: &Input) {
             env.map.clone(),
             input,
         );
+        let state = state.neigh(input, &mut rng, input.oil_count);
 
         let solutions = climbing(&env, state, each_duration);
         let candidates_len = solutions.len();
@@ -366,7 +367,10 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![10, 60, 20, 10]).unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![
+        10, 60, 20, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
+    .unwrap();
 
     loop {
         all_iter += 1;
