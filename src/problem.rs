@@ -2,6 +2,7 @@ use crate::grid::{Coord, Map2d};
 use im_rc::HashMap;
 use itertools::Itertools;
 use proconio::{input, source::line::LineSource};
+use rustc_hash::FxHashSet;
 use std::{
     cmp::Reverse,
     io::{self, BufReader},
@@ -59,13 +60,17 @@ impl Oils {
 
 pub struct Judge {
     source: LineSource<BufReader<io::Stdin>>,
+    wa: FxHashSet<Vec<Coord>>,
 }
 
 #[allow(dead_code)]
 impl Judge {
     pub fn new() -> Self {
         let source = LineSource::new(BufReader::new(io::stdin()));
-        Self { source }
+        Self {
+            source,
+            wa: FxHashSet::default(),
+        }
     }
 
     pub fn read_input(&mut self) -> Input {
@@ -135,12 +140,18 @@ impl Judge {
 
     pub fn answer(&mut self, coords: &[Coord]) -> Result<(), ()> {
         let len = coords.len();
-        let coords = coords
+        let coords_vec = coords.iter().copied().collect_vec();
+
+        if self.wa.contains(&coords_vec) {
+            return Err(());
+        }
+
+        let coords_str = coords
             .iter()
             .map(|c| format!("{} {}", c.row, c.col))
             .join(" ");
 
-        println!("a {} {}", len, coords);
+        println!("a {} {}", len, coords_str);
 
         input! {
             from &mut self.source,
@@ -150,6 +161,7 @@ impl Judge {
         if value == 1 {
             Ok(())
         } else {
+            self.wa.insert(coords_vec);
             Err(())
         }
     }
