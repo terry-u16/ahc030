@@ -70,9 +70,12 @@ pub fn solve(mut judge: Judge, input: &Input) {
             judge.comment_colors(&colors);
 
             if solutions.len() >= 2 {
-                let mut map = Map2d::new_with(0, input.map_size);
+                let mut maps = vec![];
+                let solutions = solutions.choose_multiple(&mut rng, 50.min(solutions.len()));
 
-                for shifts in solutions.choose_multiple(&mut rng, 2) {
+                for shifts in solutions {
+                    let mut map = Map2d::new_with(0, input.map_size);
+
                     for (&shift, oil) in shifts.iter().zip(input.oils.iter()) {
                         for &p in oil.pos.iter() {
                             let p = p + shift;
@@ -80,14 +83,38 @@ pub fn solve(mut judge: Judge, input: &Input) {
                             map[p] += 1;
                         }
                     }
+
+                    maps.push(map);
+                }
+
+                let mut diffs = Map2d::new_with(0, input.map_size);
+
+                for i in 0..maps.len() {
+                    for j in i + 1..maps.len() {
+                        for ((v0, v1), diff) in
+                            maps[i].iter().zip(maps[j].iter()).zip(diffs.iter_mut())
+                        {
+                            *diff += (v0 != v1) as u32;
+                        }
+                    }
                 }
 
                 let mut candidates = vec![];
+                let mut max_diff = 0;
 
                 for row in 0..input.map_size {
                     for col in 0..input.map_size {
                         let c = Coord::new(row, col);
-                        if map[c] % 2 == 1 && env.map[c].is_none() {
+
+                        if env.map[c].is_some() {
+                            continue;
+                        }
+
+                        if max_diff.change_max(diffs[c]) {
+                            candidates.clear();
+                        }
+
+                        if diffs[c] == max_diff {
                             candidates.push(c);
                         }
                     }
