@@ -1,4 +1,4 @@
-use std::io::{self, BufReader, Write as _};
+use std::io::{self, BufReader};
 
 use itertools::Itertools;
 use proconio::source::line::LineSource;
