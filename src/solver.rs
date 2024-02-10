@@ -29,10 +29,6 @@ pub fn solve(mut judge: Judge, input: &Input) {
 
         env.map[coord] = Some(judge.query_single(coord));
 
-        if turn < 5 {
-            continue;
-        }
-
         let state = State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
             env.map.clone(),
