@@ -1,3 +1,7 @@
+use std::io::{self, BufReader, Write as _};
+
+use itertools::Itertools;
+use proconio::source::line::LineSource;
 #[allow(unused_imports)]
 use proconio::*;
 #[allow(unused_imports)]
@@ -28,5 +32,53 @@ impl<T: PartialOrd> ChangeMinMax for T {
 struct Input {}
 
 fn main() {
-    todo!();
+    let mut source = LineSource::new(BufReader::new(io::stdin()));
+
+    input! {
+        from &mut source,
+        n: usize,
+        m: usize,
+        eps: f64,
+    }
+
+    let fields = vec![vec![0; n]; n];
+
+    for _ in 0..m {
+        input! {
+            from &mut source,
+            d: usize,
+        }
+
+        for _ in 0..d {
+            input! {
+                from &mut source,
+                i: usize,
+                j: usize,
+            }
+        }
+    }
+
+    let mut results = vec![];
+
+    for i in 0..n {
+        for j in 0..n {
+            println!("q 1 {} {}", i, j);
+
+            input! {
+                from &mut source,
+                response: i32,
+            }
+
+            if response != 0 {
+                results.push((i, j));
+            }
+        }
+    }
+
+    let pos = results
+        .iter()
+        .map(|(i, j)| format!("{} {}", i, j))
+        .join(" ");
+
+    println!("a {} {}", results.len(), pos);
 }
