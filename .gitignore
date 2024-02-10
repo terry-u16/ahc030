@@ -1,0 +1,5 @@
+*.exe
+/data
+/out.txt
+/expanded.rs
+/tools/target
