@@ -39,6 +39,9 @@ pub fn solve(mut judge: Judge, input: &Input) {
         let candidates_len = solutions.len() / input.dup_mul;
         eprintln!("turn: {}, solutions: {}", turn, candidates_len);
 
+        let solutions = solutions.into_iter().collect_vec();
+        color_map(&solutions, &mut rng, &env, input, candidates_len, &judge);
+
         if solutions.len() % input.dup_mul == 0 && candidates_len == 1 {
             let solution = solutions.iter().next().unwrap();
             let solution = State::new(solution.clone(), env.map.clone(), input);
@@ -52,76 +55,8 @@ pub fn solve(mut judge: Judge, input: &Input) {
             if judge.answer(&answer).is_ok() {
                 return;
             }
-        } else {
-            let solutions = solutions.into_iter().collect_vec();
-            let solution = solutions.choose(&mut rng).unwrap().clone();
-            let solution = State::new(solution.clone(), env.map.clone(), input);
-            let mut colors = Map2d::new_with(0.0, input.map_size);
-
-            for &c in solution.to_answer(input).iter() {
-                colors[c] = 1.0 / candidates_len as f64;
-            }
-
-            judge.comment(&format!(
-                "score: {}, remaining: {}",
-                solution.calc_score(),
-                candidates_len
-            ));
-            judge.comment_colors(&colors);
-
-            if solutions.len() >= 2 {
-                let mut maps = vec![];
-                let solutions = solutions.choose_multiple(&mut rng, 50.min(solutions.len()));
-
-                for shifts in solutions {
-                    let mut map = Map2d::new_with(0, input.map_size);
-
-                    for (&shift, oil) in shifts.iter().zip(input.oils.iter()) {
-                        for &p in oil.pos.iter() {
-                            let p = p + shift;
-
-                            map[p] += 1;
-                        }
-                    }
-
-                    maps.push(map);
-                }
-
-                let mut diffs = Map2d::new_with(0, input.map_size);
-
-                for i in 0..maps.len() {
-                    for j in i + 1..maps.len() {
-                        for ((v0, v1), diff) in
-                            maps[i].iter().zip(maps[j].iter()).zip(diffs.iter_mut())
-                        {
-                            *diff += (v0 != v1) as u32;
-                        }
-                    }
-                }
-
-                let mut candidates = vec![];
-                let mut max_diff = 0;
-
-                for row in 0..input.map_size {
-                    for col in 0..input.map_size {
-                        let c = Coord::new(row, col);
-
-                        if env.map[c].is_some() {
-                            continue;
-                        }
-
-                        if max_diff.change_max(diffs[c]) {
-                            candidates.clear();
-                        }
-
-                        if diffs[c] == max_diff {
-                            candidates.push(c);
-                        }
-                    }
-                }
-
-                next_pos = candidates.choose(&mut rng).copied();
-            }
+        } else if solutions.len() >= 2 {
+            next_pos = choose_next_pos(solutions, &mut rng, input, &env);
         }
     }
 
@@ -138,6 +73,87 @@ pub fn solve(mut judge: Judge, input: &Input) {
     }
 
     judge.answer(&answer).unwrap();
+}
+
+fn choose_next_pos(
+    solutions: Vec<Vec<CoordDiff>>,
+    rng: &mut rand_pcg::Mcg128Xsl64,
+    input: &Input,
+    env: &Env<'_>,
+) -> Option<Coord> {
+    let mut maps = vec![];
+    let solutions = solutions.choose_multiple(rng, 50.min(solutions.len()));
+
+    for shifts in solutions {
+        let mut map = Map2d::new_with(0, input.map_size);
+
+        for (&shift, oil) in shifts.iter().zip(input.oils.iter()) {
+            for &p in oil.pos.iter() {
+                let p = p + shift;
+
+                map[p] += 1;
+            }
+        }
+
+        maps.push(map);
+    }
+
+    let mut diffs = Map2d::new_with(0, input.map_size);
+
+    for i in 0..maps.len() {
+        for j in i + 1..maps.len() {
+            for ((v0, v1), diff) in maps[i].iter().zip(maps[j].iter()).zip(diffs.iter_mut()) {
+                *diff += (v0 != v1) as u32;
+            }
+        }
+    }
+
+    let mut candidates = vec![];
+    let mut max_diff = 0;
+
+    for row in 0..input.map_size {
+        for col in 0..input.map_size {
+            let c = Coord::new(row, col);
+
+            if env.map[c].is_some() {
+                continue;
+            }
+
+            if max_diff.change_max(diffs[c]) {
+                candidates.clear();
+            }
+
+            if diffs[c] == max_diff {
+                candidates.push(c);
+            }
+        }
+    }
+
+    candidates.choose(rng).copied()
+}
+
+fn color_map(
+    solutions: &Vec<Vec<CoordDiff>>,
+    rng: &mut rand_pcg::Mcg128Xsl64,
+    env: &Env<'_>,
+    input: &Input,
+    candidates_len: usize,
+    judge: &Judge,
+) {
+    let solution = solutions.choose(rng).unwrap().clone();
+    let solution = State::new(solution.clone(), env.map.clone(), input);
+    let mut colors = Map2d::new_with(0.0, input.map_size);
+
+    for &c in solution.to_answer(input).iter() {
+        colors[c] = 1.0 / candidates_len as f64;
+    }
+
+    judge.comment(&format!(
+        "score: {}, remaining: {}",
+        solution.calc_score(),
+        candidates_len
+    ));
+    judge.comment_colors(&colors);
 }
 
 #[derive(Debug, Clone)]
