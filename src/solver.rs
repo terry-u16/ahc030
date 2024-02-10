@@ -85,7 +85,8 @@ fn choose_next_pos(
     env: &Env<'_>,
 ) -> Option<Coord> {
     let mut maps = vec![];
-    let solutions = solutions.choose_multiple(rng, 100.min(solutions.len()));
+    let sample_count = 200.min(solutions.len());
+    let solutions = solutions.choose_multiple(rng, sample_count);
 
     for shifts in solutions {
         let mut map = Map2d::new_with(0, input.map_size);
@@ -108,6 +109,10 @@ fn choose_next_pos(
         .copied()
         .unwrap_or(0) as usize;
 
+    let log_table = (0..=sample_count)
+        .map(|v| (v.max(1) as f64 / sample_count as f64).ln())
+        .collect::<Vec<_>>();
+
     let mut counts = Map2d::new_with(vec![0; max_v + 1], input.map_size);
 
     for map in maps.iter() {
@@ -117,7 +122,7 @@ fn choose_next_pos(
     }
 
     let mut candidates = vec![];
-    let mut best_count = usize::MAX;
+    let mut best_entropy = f64::MIN;
 
     for row in 0..input.map_size {
         for col in 0..input.map_size {
@@ -127,13 +132,23 @@ fn choose_next_pos(
                 continue;
             }
 
-            let max = counts[c].iter().max().copied().unwrap();
+            // エントロピーを計算し、最大となる箇所を選ぶ
+            let mut entropy = 0.0;
 
-            if best_count.change_min(max) {
+            for &c in counts[c].iter() {
+                if c == 0 {
+                    continue;
+                }
+
+                let p = c as f64 / sample_count as f64;
+                entropy -= p * log_table[c];
+            }
+
+            if best_entropy.change_max(entropy) {
                 candidates.clear();
             }
 
-            if best_count == max {
+            if best_entropy == entropy {
                 candidates.push(c);
             }
         }
