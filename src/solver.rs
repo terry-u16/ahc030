@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use rand::{seq::SliceRandom as _, Rng};
+use rand_core::SeedableRng;
 use rand_distr::{Distribution, WeightedAliasIndex};
 use rand_pcg::Pcg64Mcg;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -12,7 +13,7 @@ use crate::{
 
 pub fn solve(mut judge: Judge, input: &Input) {
     let mut env = Env::new(input);
-    let mut rng = Pcg64Mcg::new(42);
+    let mut rng = Pcg64Mcg::from_entropy();
 
     let each_duration = 2.0 / (input.map_size * input.map_size) as f64;
     let mut next_pos = None;
