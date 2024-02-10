@@ -1,6 +1,6 @@
-use std::fmt::Display;
+use std::{fmt::Display, vec};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct Coord {
     pub row: usize,
     pub col: usize,
@@ -35,7 +35,7 @@ impl Display for Coord {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct CoordDiff {
     pub dr: isize,
     pub dc: isize,
@@ -100,10 +100,27 @@ pub struct Map2d<T> {
     map: Vec<T>,
 }
 
+#[allow(dead_code)]
 impl<T> Map2d<T> {
     pub fn new(map: Vec<T>, size: usize) -> Self {
         assert_eq!(size * size, map.len());
         Self { size, map }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.map.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.map.iter_mut()
+    }
+}
+
+#[allow(dead_code)]
+impl<T: Clone> Map2d<T> {
+    pub fn new_with(v: T, size: usize) -> Self {
+        let map = vec![v; size * size];
+        Self::new(map, size)
     }
 }
 

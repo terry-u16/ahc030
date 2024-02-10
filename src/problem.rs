@@ -1,4 +1,5 @@
 use crate::grid::{Coord, Map2d};
+use im_rc::HashMap;
 use itertools::Itertools;
 use proconio::{input, source::line::LineSource};
 use std::{
@@ -12,6 +13,34 @@ pub struct Input {
     pub oil_count: usize,
     pub eps: f64,
     pub oils: Vec<Oils>,
+    pub dup_mul: usize,
+}
+
+impl Input {
+    fn new(map_size: usize, oil_count: usize, eps: f64, oils: Vec<Oils>) -> Self {
+        let mut counts = HashMap::new();
+
+        for oil in &oils {
+            let entry = counts.entry(oil.pos.clone()).or_insert(0);
+            *entry += 1;
+        }
+
+        let mut dup_mul = 1;
+
+        for &c in counts.values() {
+            for i in 1..=c {
+                dup_mul *= i;
+            }
+        }
+
+        Self {
+            map_size,
+            oil_count,
+            eps,
+            oils,
+            dup_mul,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -23,7 +52,8 @@ pub struct Oils {
 }
 
 impl Oils {
-    pub fn new(pos: Vec<Coord>) -> Self {
+    fn new(mut pos: Vec<Coord>) -> Self {
+        pos.sort();
         let height = pos.iter().map(|c| c.row).max().unwrap() + 1;
         let width = pos.iter().map(|c| c.col).max().unwrap() + 1;
         let len = pos.len();
@@ -81,12 +111,7 @@ impl Judge {
 
         oils.sort_by_key(|o| Reverse(o.len));
 
-        Input {
-            map_size: n,
-            oil_count: m,
-            eps,
-            oils,
-        }
+        Input::new(n, m, eps, oils)
     }
 
     pub fn query_single(&mut self, coord: Coord) -> i32 {
