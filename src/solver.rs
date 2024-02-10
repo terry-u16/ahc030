@@ -43,7 +43,14 @@ pub fn solve(mut judge: Judge, input: &Input) {
         eprintln!("turn: {}, solutions: {}", turn, candidates_len);
 
         let solutions = solutions.into_iter().collect_vec();
-        color_map(&solutions, &mut rng, &env, input, candidates_len, &judge);
+        color_map(
+            &solutions,
+            &mut rng,
+            &env,
+            input,
+            candidates_len,
+            &mut judge,
+        );
 
         if candidates_len == 1 {
             let solution = solutions.iter().next().unwrap();
@@ -59,7 +66,7 @@ pub fn solve(mut judge: Judge, input: &Input) {
                 return;
             }
         } else if solutions.len() >= 2 {
-            next_pos = choose_next_pos(solutions, &mut rng, input, &env);
+            next_pos = choose_next_pos(solutions, &mut rng, input, &env, &mut judge);
         }
     }
 
@@ -83,6 +90,7 @@ fn choose_next_pos(
     rng: &mut rand_pcg::Mcg128Xsl64,
     input: &Input,
     env: &Env<'_>,
+    judge: &mut Judge,
 ) -> Option<Coord> {
     let mut maps = vec![];
     let sample_count = 200.min(solutions.len());
@@ -110,7 +118,7 @@ fn choose_next_pos(
         .unwrap_or(0) as usize;
 
     let log_table = (0..=sample_count)
-        .map(|v| (v.max(1) as f64 / sample_count as f64).ln())
+        .map(|v| (v.max(1) as f64 / sample_count as f64).log2())
         .collect::<Vec<_>>();
 
     let mut counts = Map2d::new_with(vec![0; max_v + 1], input.map_size);
@@ -136,10 +144,6 @@ fn choose_next_pos(
             let mut entropy = 0.0;
 
             for &c in counts[c].iter() {
-                if c == 0 {
-                    continue;
-                }
-
                 let p = c as f64 / sample_count as f64;
                 entropy -= p * log_table[c];
             }
@@ -154,7 +158,13 @@ fn choose_next_pos(
         }
     }
 
-    candidates.choose(rng).copied()
+    let c = candidates.choose(rng).copied();
+
+    if let Some(c) = c {
+        judge.comment(&format!("next: {} with entropy {:.3}", c, best_entropy));
+    }
+
+    c
 }
 
 fn color_map(
@@ -163,7 +173,7 @@ fn color_map(
     env: &Env<'_>,
     input: &Input,
     candidates_len: usize,
-    judge: &Judge,
+    judge: &mut Judge,
 ) {
     let solution = solutions.choose(rng).unwrap().clone();
     let solution = State::new(solution.clone(), env.map.clone(), input);

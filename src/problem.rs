@@ -61,6 +61,8 @@ impl Oils {
 pub struct Judge {
     source: LineSource<BufReader<io::Stdin>>,
     wa: FxHashSet<Vec<Coord>>,
+    comment_buf: Vec<String>,
+    color_buf: Vec<Map2d<f64>>,
 }
 
 #[allow(dead_code)]
@@ -70,6 +72,8 @@ impl Judge {
         Self {
             source,
             wa: FxHashSet::default(),
+            comment_buf: vec![],
+            color_buf: vec![],
         }
     }
 
@@ -110,6 +114,8 @@ impl Judge {
     }
 
     pub fn query_single(&mut self, coord: Coord) -> i32 {
+        self.flush_comments();
+
         println!("q 1 {} {}", coord.row, coord.col);
 
         input! {
@@ -122,6 +128,7 @@ impl Judge {
 
     pub fn query_multiple(&mut self, coords: &[Coord]) -> f64 {
         assert!(coords.len() >= 2);
+        self.flush_comments();
         let len = coords.len();
         let coords = coords
             .iter()
@@ -139,6 +146,7 @@ impl Judge {
     }
 
     pub fn answer(&mut self, coords: &[Coord]) -> Result<(), ()> {
+        self.flush_comments();
         let len = coords.len();
         let coords_vec = coords.iter().copied().collect_vec();
 
@@ -166,18 +174,32 @@ impl Judge {
         }
     }
 
-    pub fn comment(&self, message: &str) {
-        println!("# {}", message);
+    pub fn comment(&mut self, message: &str) {
+        self.comment_buf.push(message.to_string());
     }
 
-    pub fn comment_colors(&self, colors: &Map2d<f64>) {
-        for row in 0..colors.size {
-            for col in 0..colors.size {
-                let c = Coord::new(row, col);
-                let v = ((1.0 - colors[c].clamp(0.0, 1.0)) * 255.0).round() as u8;
-                let color = format!("#{:02x}{:02x}{:02x}", 255, v, v);
-                println!("#c {row} {col} {color}");
+    pub fn comment_colors(&mut self, colors: &Map2d<f64>) {
+        self.color_buf.push(colors.clone());
+    }
+
+    fn flush_comments(&mut self) {
+        for comment in &self.comment_buf {
+            println!("# {}", comment);
+        }
+
+        self.comment_buf.clear();
+
+        for colors in self.color_buf.iter() {
+            for row in 0..colors.size {
+                for col in 0..colors.size {
+                    let c = Coord::new(row, col);
+                    let v = ((1.0 - colors[c].clamp(0.0, 1.0)) * 255.0).round() as u8;
+                    let color = format!("#{:02x}{:02x}{:02x}", 255, v, v);
+                    println!("#c {row} {col} {color}");
+                }
             }
         }
+
+        self.color_buf.clear();
     }
 }
