@@ -19,18 +19,6 @@ pub fn solve(mut judge: Judge, input: &Input) {
     let mut next_pos = None;
 
     for turn in 0..input.map_size * input.map_size {
-        let coord = next_pos.take().unwrap_or_else(|| loop {
-            let row = rng.gen_range(0..input.map_size);
-            let col = rng.gen_range(0..input.map_size);
-            let c = Coord::new(row, col);
-
-            if env.map[c].is_none() {
-                break c;
-            }
-        });
-
-        env.map[coord] = Some(judge.query_single(coord));
-
         let state = State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
             env.map.clone(),
@@ -56,18 +44,28 @@ pub fn solve(mut judge: Judge, input: &Input) {
             let solution = solutions.iter().next().unwrap();
             let solution = State::new(solution.clone(), env.map.clone(), input);
 
-            if solution.calc_score() != 0 {
-                continue;
-            }
+            if solution.calc_score() == 0 {
+                let answer = solution.to_answer(input);
 
-            let answer = solution.to_answer(input);
-
-            if judge.answer(&answer).is_ok() {
-                return;
+                if judge.answer(&answer).is_ok() {
+                    return;
+                }
             }
         } else if solutions.len() >= 2 {
             next_pos = choose_next_pos(solutions, &mut rng, input, &env, &mut judge);
         }
+
+        let coord = next_pos.take().unwrap_or_else(|| loop {
+            let row = rng.gen_range(0..input.map_size);
+            let col = rng.gen_range(0..input.map_size);
+            let c = Coord::new(row, col);
+
+            if env.map[c].is_none() {
+                break c;
+            }
+        });
+
+        env.map[coord] = Some(judge.query_single(coord));
     }
 
     let mut answer = vec![];
