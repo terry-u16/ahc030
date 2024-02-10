@@ -366,7 +366,7 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![10, 70, 20]).unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![10, 60, 20, 10]).unwrap();
 
     loop {
         all_iter += 1;
