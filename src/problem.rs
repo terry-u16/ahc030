@@ -189,14 +189,15 @@ impl Judge {
             return Ok(());
         }
 
-        self.query_count += 1;
-        self.flush_comments();
         let len = coords.len();
         let coords_vec = coords.iter().copied().collect_vec();
 
         if self.wa.contains(&coords_vec) {
             return Err(());
         }
+
+        self.query_count += 1;
+        self.flush_comments();
 
         let coords_str = coords
             .iter()
