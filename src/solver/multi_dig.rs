@@ -37,9 +37,10 @@ impl Solver for MultiDigSolver {
             .collect_vec();
         let mut rng = Pcg64Mcg::from_entropy();
         let mcmc_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
+        let mut next_start = vec![CoordDiff::new(0, 0); input.oil_count];
 
         for _ in 0..input.map_size * input.map_size * 2 {
-            let state = State::new(vec![CoordDiff::new(0, 0); input.oil_count], &env);
+            let state = State::new(next_start, &env);
 
             let mut states = mcmc(&env, state, mcmc_duration, &mut rng);
             states.sort_unstable();
@@ -48,6 +49,7 @@ impl Solver for MultiDigSolver {
                 .sort_unstable_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
 
             let state = &states[0];
+            next_start = state.shift.clone();
             let ratio = if states.len() >= 2 {
                 (state.log_likelihood - states[1].log_likelihood).exp()
             } else {
@@ -77,7 +79,9 @@ impl Solver for MultiDigSolver {
                 }
             }
 
-            let count = rng.gen_range(10..=25);
+            let count = rng.gen_range(
+                input.map_size * input.map_size / 4..=input.map_size * input.map_size / 2,
+            );
             let targets = all_coords
                 .choose_multiple(&mut rng, count)
                 .copied()
