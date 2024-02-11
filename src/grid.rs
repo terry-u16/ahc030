@@ -35,6 +35,18 @@ impl Display for Coord {
     }
 }
 
+impl TryFrom<CoordDiff> for Coord {
+    type Error = String;
+
+    fn try_from(diff: CoordDiff) -> Result<Self, Self::Error> {
+        if diff.dr < 0 || diff.dc < 0 {
+            Err(format!("{} をCoordに変換できません", diff))
+        } else {
+            Ok(Self::new(diff.dr as usize, diff.dc as usize))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct CoordDiff {
     pub dr: isize,
@@ -55,6 +67,12 @@ impl CoordDiff {
 impl Display for CoordDiff {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({}, {})", self.dr, self.dc)
+    }
+}
+
+impl From<Coord> for CoordDiff {
+    fn from(coord: Coord) -> Self {
+        Self::new(coord.row as isize, coord.col as isize)
     }
 }
 
