@@ -24,7 +24,7 @@ pub fn solve(mut judge: Judge, input: &Input) {
             env.map.clone(),
             input,
         );
-        let state = state.neigh(input, &mut rng, input.oil_count);
+        let state = state.neigh2(input, &mut rng, input.oil_count);
 
         let solutions = climbing(&env, state, each_duration);
         let candidates_len = solutions.len();
@@ -240,7 +240,7 @@ impl State {
         state
     }
 
-    fn neigh(&self, input: &Input, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+    fn neigh1(&self, input: &Input, rng: &mut impl Rng, choose_cnt: usize) -> Self {
         let mut oil_indices = vec![];
 
         for _ in 0..choose_cnt {
@@ -333,6 +333,209 @@ impl State {
         state
     }
 
+    fn neigh2(&self, input: &Input, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+        let mut oil_indices = vec![];
+
+        for _ in 0..choose_cnt {
+            let oil = loop {
+                let oil = rng.gen_range(0..input.oil_count);
+
+                if !oil_indices.contains(&oil) {
+                    break oil;
+                }
+            };
+
+            oil_indices.push(oil);
+        }
+
+        let mut state = self.clone();
+
+        // 変更対象の油田を一旦削除
+        for &oil in &oil_indices {
+            let shift = state.shift[oil];
+
+            for &p in input.oils[oil].pos.iter() {
+                let p = p + shift;
+
+                let Some(v) = &mut state.map[p] else {
+                    continue;
+                };
+
+                if *v >= 0 {
+                    state.violations += 1;
+                } else {
+                    state.violations -= 1;
+                }
+
+                *v += 1;
+            }
+        }
+
+        // 各油田について置き場所の候補をceil(((N - w + 1)(N - h + 1))^(1/m) / 2)個選ぶ
+        let mut candidates_all = vec![];
+        let mut costs_all = vec![];
+
+        for &oil_i in &oil_indices {
+            let oil = &input.oils[oil_i];
+            let mut candidates = vec![];
+            let mut costs = Map2d::new_with(0, input.map_size);
+
+            for row in 0..=input.map_size - oil.height {
+                for col in 0..=input.map_size - oil.width {
+                    let shift = CoordDiff::new(row as isize, col as isize);
+
+                    let mut violation = 0;
+
+                    for &p in oil.pos.iter() {
+                        let p = p + shift;
+
+                        let Some(v) = &state.map[p] else {
+                            continue;
+                        };
+
+                        if *v > 0 {
+                            violation -= 1;
+                        } else {
+                            violation += 1;
+                        }
+                    }
+
+                    let c = Coord::new(row, col);
+                    candidates.push(c);
+                    costs[c] = violation;
+                }
+            }
+
+            let count =
+                ((candidates.len() as f64).powf(1.0 / choose_cnt as f64) * 0.5).ceil() as usize;
+
+            candidates.shuffle(rng);
+
+            if candidates.len() > count {
+                candidates.select_nth_unstable_by_key(count - 1, |&c| costs[c]);
+                candidates.truncate(count);
+            }
+            candidates_all.push(candidates.iter().map(|&c| CoordDiff::from(c)).collect_vec());
+            costs_all.push(costs);
+        }
+
+        // 候補の組をDFSで全探索
+        let mut best_violation = i32::MAX;
+        let mut best_shifts = vec![];
+        let mut current_shifts = vec![];
+        let mut map = state.map.clone();
+        let mut violation = 0;
+
+        state.dfs_candidates(
+            input,
+            &candidates_all,
+            &mut current_shifts,
+            &mut map,
+            &oil_indices,
+            &mut violation,
+            &mut best_violation,
+            &mut best_shifts,
+            0,
+        );
+
+        // 結果を反映
+        for (&shift, &oil_i) in best_shifts.iter().zip(oil_indices.iter()) {
+            state.shift[oil_i] = shift;
+
+            for &p in input.oils[oil_i].pos.iter() {
+                let p = p + shift;
+
+                let Some(v) = &mut state.map[p] else {
+                    continue;
+                };
+
+                if *v > 0 {
+                    state.violations -= 1;
+                } else {
+                    state.violations += 1;
+                }
+
+                *v -= 1;
+            }
+        }
+
+        state.normalize(input);
+
+        state
+    }
+
+    fn dfs_candidates(
+        &self,
+        input: &Input,
+        candidates_all: &[Vec<CoordDiff>],
+        current_shifts: &mut Vec<CoordDiff>,
+        map: &mut Map2d<Option<i32>>,
+        oil_indices: &[usize],
+        violation: &mut i32,
+        best_violation: &mut i32,
+        best_shifts: &mut Vec<CoordDiff>,
+        depth: usize,
+    ) {
+        if depth == candidates_all.len() {
+            if best_violation.change_min(*violation) {
+                *best_shifts = current_shifts.clone();
+            }
+        } else {
+            let candidates = &candidates_all[depth];
+            let oil = &input.oils[oil_indices[depth]];
+
+            for &shift in candidates {
+                for &p in oil.pos.iter() {
+                    let p = p + shift;
+
+                    let Some(v) = &mut map[p] else {
+                        continue;
+                    };
+
+                    if *v > 0 {
+                        *violation -= 1;
+                    } else {
+                        *violation += 1;
+                    }
+
+                    *v -= 1;
+                }
+
+                current_shifts.push(shift);
+
+                self.dfs_candidates(
+                    input,
+                    candidates_all,
+                    current_shifts,
+                    map,
+                    oil_indices,
+                    violation,
+                    best_violation,
+                    best_shifts,
+                    depth + 1,
+                );
+
+                current_shifts.pop();
+
+                for &p in oil.pos.iter() {
+                    let p = p + shift;
+
+                    let Some(v) = &mut map[p] else {
+                        continue;
+                    };
+
+                    if *v >= 0 {
+                        *violation += 1;
+                    } else {
+                        *violation -= 1;
+                    }
+
+                    *v += 1;
+                }
+            }
+        }
+    }
+
     fn normalize(&mut self, input: &Input) {
         let mut groups = FxHashMap::default();
 
@@ -398,10 +601,7 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![
-        10, 60, 20, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    ])
-    .unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![10, 60, 20, 10]).unwrap();
 
     loop {
         all_iter += 1;
@@ -415,7 +615,11 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
 
         // 変形
         let oil_count = (oil_count_dist.sample(&mut rng) + 1).min(env.input.oil_count);
-        let new_solution = solution.neigh(&env.input, &mut rng, oil_count);
+        let new_solution = if rng.gen_bool(0.8) {
+            solution.neigh1(&env.input, &mut rng, oil_count)
+        } else {
+            solution.neigh2(&env.input, &mut rng, oil_count)
+        };
 
         // スコア計算
         let new_score = new_solution.calc_score();
