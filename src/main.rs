@@ -1,4 +1,5 @@
 mod common;
+mod distributions;
 mod grid;
 mod problem;
 mod solver;
@@ -7,7 +8,7 @@ mod solver;
 use proconio::*;
 #[allow(unused_imports)]
 use rand::prelude::*;
-use solver::Solver as _;
+use solver::Solver;
 
 use crate::problem::Judge;
 
@@ -15,6 +16,11 @@ fn main() {
     let mut judge = Judge::new();
     let input = judge.read_input();
 
-    let solver = solver::single_dig::SingleDigSolver::new(judge);
+    let mut solver: Box<dyn Solver> = if input.eps <= 0.1 && input.oil_count <= 8 {
+        Box::new(solver::multi_dig::MultiDigSolver::new(judge))
+    } else {
+        Box::new(solver::single_dig::SingleDigSolver::new(judge))
+    };
+
     solver.solve(&input);
 }

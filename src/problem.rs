@@ -2,6 +2,8 @@ use crate::grid::{Coord, Map2d};
 use im_rc::HashMap;
 use itertools::Itertools;
 use proconio::{input, source::line::LineSource};
+use rand::Rng as _;
+use rand_pcg::Pcg64Mcg;
 use rustc_hash::FxHashSet;
 use std::{
     cmp::Reverse,
@@ -14,6 +16,7 @@ pub struct Input {
     pub oil_count: usize,
     pub eps: f64,
     pub oils: Vec<Oils>,
+    pub hashes: Vec<Map2d<u64>>,
 }
 
 impl Input {
@@ -25,11 +28,27 @@ impl Input {
             *entry += 1;
         }
 
+        let mut rng = Pcg64Mcg::new(42);
+        let mut hashes = vec![];
+
+        for _ in 0..oil_count {
+            let mut map = Map2d::new_with(0, map_size);
+
+            for row in 0..map_size {
+                for col in 0..map_size {
+                    map[Coord::new(row, col)] = rng.gen();
+                }
+            }
+
+            hashes.push(map);
+        }
+
         Self {
             map_size,
             oil_count,
             eps,
             oils,
+            hashes,
         }
     }
 }
@@ -63,6 +82,8 @@ pub struct Judge {
     wa: FxHashSet<Vec<Coord>>,
     comment_buf: Vec<String>,
     color_buf: Vec<Map2d<f64>>,
+    query_limit: usize,
+    query_count: usize,
 }
 
 #[allow(dead_code)]
@@ -74,6 +95,8 @@ impl Judge {
             wa: FxHashSet::default(),
             comment_buf: vec![],
             color_buf: vec![],
+            query_limit: 0,
+            query_count: 0,
         }
     }
 
@@ -84,6 +107,8 @@ impl Judge {
             m: usize,
             eps: f64,
         }
+
+        self.query_limit = n * n * 2;
 
         let mut oils = vec![];
 
@@ -114,6 +139,12 @@ impl Judge {
     }
 
     pub fn query_single(&mut self, coord: Coord) -> i32 {
+        if self.query_count >= self.query_limit {
+            // do nothing
+            return 0;
+        }
+
+        self.query_count += 1;
         self.flush_comments();
 
         println!("q 1 {} {}", coord.row, coord.col);
@@ -126,8 +157,15 @@ impl Judge {
         value
     }
 
-    pub fn query_multiple(&mut self, coords: &[Coord]) -> f64 {
+    pub fn query_multiple(&mut self, coords: &[Coord]) -> i32 {
         assert!(coords.len() >= 2);
+
+        if self.query_count >= self.query_limit {
+            // do nothing
+            return 0;
+        }
+
+        self.query_count += 1;
         self.flush_comments();
         let len = coords.len();
         let coords = coords
@@ -139,13 +177,19 @@ impl Judge {
 
         input! {
             from &mut self.source,
-            value: f64
+            value: i32
         }
 
         value
     }
 
     pub fn answer(&mut self, coords: &[Coord]) -> Result<(), ()> {
+        if self.query_count >= self.query_limit {
+            // do nothing
+            return Ok(());
+        }
+
+        self.query_count += 1;
         self.flush_comments();
         let len = coords.len();
         let coords_vec = coords.iter().copied().collect_vec();

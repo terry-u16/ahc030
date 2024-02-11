@@ -24,7 +24,7 @@ impl SingleDigSolver {
 }
 
 impl Solver for SingleDigSolver {
-    fn solve(mut self, input: &crate::problem::Input) {
+    fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
 
