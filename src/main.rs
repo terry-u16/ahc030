@@ -7,7 +7,7 @@ mod solver;
 use proconio::*;
 #[allow(unused_imports)]
 use rand::prelude::*;
-use solver::solve;
+use solver::Solver as _;
 
 use crate::problem::Judge;
 
@@ -15,5 +15,6 @@ fn main() {
     let mut judge = Judge::new();
     let input = judge.read_input();
 
-    solve(judge, &input);
+    let solver = solver::single_dig::SingleDigSolver::new(judge);
+    solver.solve(&input);
 }
