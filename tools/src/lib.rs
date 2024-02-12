@@ -377,7 +377,11 @@ pub fn compute_score_details(input: &Input, out: &Output) -> (i64, String, ()) {
             error = "Unexpected EOF".to_owned();
         }
     }
-    ((1e6 * score).round() as i64, error, ())
+    (
+        (1e6 * score.max(1.0 / input.n as f64)).round() as i64,
+        error,
+        (),
+    )
 }
 
 /// 0 <= val <= 1
