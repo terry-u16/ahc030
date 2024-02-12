@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use rand::{
     seq::{IteratorRandom, SliceRandom},
     Rng,
@@ -7,7 +8,7 @@ use rand_core::SeedableRng;
 use rand_distr::{Distribution, WeightedAliasIndex, WeightedIndex};
 use rand_pcg::Pcg64Mcg;
 use rustc_hash::FxHashMap;
-use std::vec;
+use std::{cmp::Reverse, vec};
 use std::{hash::Hash, time::Instant};
 
 use crate::{
@@ -107,6 +108,8 @@ impl Solver for MultiDigSolver {
 struct Env<'a> {
     input: &'a Input,
     observations: Vec<Observation>,
+    /// map[i][j][(r, c)] := i番目の観測が油田jを位置(r, c)に置いたときのマスといくつ重なるか
+    overlap_count_map: Vec<Vec<Map2d<usize>>>,
     relative_observation_indices: Vec<Map2d<Vec<(usize, usize)>>>,
     inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
 }
@@ -118,12 +121,14 @@ impl<'a> Env<'a> {
             .collect();
         let observations = vec![];
         let inv_relative_observation_indices = vec![];
+        let overlap_count_map = vec![];
 
         Self {
             input,
             observations,
             relative_observation_indices,
             inv_relative_observation_indices,
+            overlap_count_map,
         }
     }
 
@@ -136,8 +141,11 @@ impl<'a> Env<'a> {
         }
 
         let mut inv_relative_observation_indices = vec![];
+        let mut overlap_count_maps = vec![];
 
         for (oil_i, oil) in input.oils.iter().enumerate() {
+            let mut overlap_count_map = Map2d::new_with(0, input.map_size);
+
             for row in 0..=input.map_size - oil.height {
                 for col in 0..=input.map_size - oil.width {
                     let c = Coord::new(row, col);
@@ -152,17 +160,22 @@ impl<'a> Env<'a> {
                         }
                     }
 
+                    overlap_count_map[c] = count;
+
                     if count > 0 {
                         self.relative_observation_indices[oil_i][c].push((obs_id, count));
                         inv_relative_observation_indices.push((oil_i, count, shift));
                     }
                 }
             }
+
+            overlap_count_maps.push(overlap_count_map);
         }
 
         self.inv_relative_observation_indices
             .push(inv_relative_observation_indices);
         self.observations.push(observation);
+        self.overlap_count_map.push(overlap_count_maps);
     }
 }
 
@@ -315,31 +328,75 @@ impl State {
             let height = env.input.map_size - env.input.oils[oil_i].height + 1;
             let width = env.input.map_size - env.input.oils[oil_i].width + 1;
             let candidate_count = height * width;
-            let mut shifts = Vec::with_capacity(candidate_count);
-            let mut log_likelihoods = Vec::with_capacity(candidate_count);
-            let mut max_log_likelihood = f64::NEG_INFINITY;
 
             // 消し直す
             self.remove_oil(env, oil_i);
 
-            for row in 0..height {
-                for col in 0..width {
-                    let shift = CoordDiff::new(row as isize, col as isize);
-                    let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
-                    shifts.push(shift);
-                    log_likelihoods.push(log_likelihood);
-                    max_log_likelihood.change_max(log_likelihood);
+            let all_shifts = (0..height)
+                .flat_map(|row| {
+                    (0..width).map(move |col| CoordDiff::new(row as isize, col as isize))
+                })
+                .collect_vec();
+            let mut log_likelihoods = vec![self.log_likelihood; candidate_count];
+            let mut candidates = (0..candidate_count).collect_vec();
+            candidates.shuffle(rng);
+
+            // 対数尤度の計算が激重なので、Successive Halvingの要領で枝刈りしていく
+            const LAST_REMAINING: usize = 4;
+            let checkpoints = if candidates.len() >= LAST_REMAINING * 2 {
+                let div = ((candidates.len() * 2) - 1).ilog2() - LAST_REMAINING.ilog2();
+
+                (1..=div)
+                    .map(|i| {
+                        (env.observations.len() as f64 * (i as f64 / div as f64)).ceil() as usize
+                    })
+                    .collect_vec()
+            } else {
+                // 枝刈り不要なコーナーケースに注意
+                vec![]
+            };
+            let mut phase = 0;
+
+            // 観測の順番もシャッフルした方が良さそう
+            let mut observation_indices = (0..env.observations.len()).collect_vec();
+            observation_indices.shuffle(rng);
+
+            for (i, &obs_i) in observation_indices.iter().enumerate() {
+                while phase < checkpoints.len() && checkpoints[phase] <= i {
+                    let new_len = (candidates.len() + 1) / 2;
+                    candidates.select_nth_unstable_by_key(new_len - 1, |&i| {
+                        Reverse(OrderedFloat(log_likelihoods[i]))
+                    });
+                    candidates.truncate(new_len);
+                    phase += 1;
+                }
+
+                let observation = &env.observations[obs_i];
+                let overlap_count_maps = &env.overlap_count_map[obs_i][oil_i];
+
+                for &shift_i in candidates.iter() {
+                    let shift = all_shifts[shift_i];
+                    let log_likelihood = &mut log_likelihoods[shift_i];
+
+                    let mut count = self.counts[obs_i];
+                    *log_likelihood -= observation.log_likelihoods[count];
+                    count += overlap_count_maps[Coord::try_from(shift).unwrap()];
+                    *log_likelihood += observation.log_likelihoods[count];
                 }
             }
 
-            let likelihoods = log_likelihoods
+            let max_log_likelihood = candidates
                 .iter()
-                .map(|&log_likelihood| f64::exp(log_likelihood - max_log_likelihood))
+                .map(|&i| log_likelihoods[i])
+                .fold(f64::MIN, f64::max);
+            let likelihoods = candidates
+                .iter()
+                .map(|&i| f64::exp(log_likelihoods[i] - max_log_likelihood))
                 .collect_vec();
 
             let dist = WeightedIndex::new(likelihoods).unwrap();
             let sample_i = dist.sample(rng);
-            let shift = shifts[sample_i];
+            let shift = all_shifts[candidates[sample_i]];
 
             self.add_oil(env, oil_i, shift);
         }
