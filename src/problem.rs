@@ -145,6 +145,14 @@ impl Judge {
         Input::new(n, m, eps, oils)
     }
 
+    pub fn can_query(&self) -> bool {
+        self.query_count < self.query_limit
+    }
+
+    pub fn remaining_query_count(&self) -> usize {
+        self.query_limit - self.query_count
+    }
+
     pub fn query_single(&mut self, coord: Coord) -> i32 {
         if self.query_count >= self.query_limit {
             // do nothing

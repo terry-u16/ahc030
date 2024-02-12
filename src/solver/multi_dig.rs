@@ -27,6 +27,18 @@ impl MultiDigSolver {
     pub fn new(judge: Judge) -> Self {
         Self { judge }
     }
+
+    fn answer_all(&mut self, states: &Vec<State>, input: &Input) -> Result<(), ()> {
+        // 全部順番に答える
+        for state in states.iter() {
+            let answer = state.to_answer(input);
+            if self.judge.answer(&answer).is_ok() {
+                return Ok(());
+            }
+        }
+
+        Err(())
+    }
 }
 
 impl Solver for MultiDigSolver {
@@ -37,12 +49,21 @@ impl Solver for MultiDigSolver {
             .collect_vec();
         let mut rng = Pcg64Mcg::from_entropy();
         let mcmc_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
-        let mut next_start = vec![CoordDiff::new(0, 0); input.oil_count];
         let since = Instant::now();
+        let mut states = vec![State::new(
+            vec![CoordDiff::new(0, 0); input.oil_count],
+            &env,
+        )];
+
+        const ANSWER_THRESHOLD_RATIO: f64 = 100.0;
 
         for _ in 0..input.map_size * input.map_size * 2 {
             // TLE緊急回避モード
             if since.elapsed().as_secs_f64() >= 2.8 {
+                if self.answer_all(&states, input).is_ok() {
+                    return;
+                }
+
                 for _ in 0..input.map_size * input.map_size * 2 {
                     self.judge.query_single(Coord::new(0, 0));
                 }
@@ -50,16 +71,27 @@ impl Solver for MultiDigSolver {
                 return;
             }
 
-            let state = State::new(next_start, &env);
+            // 尤度の比に応じてMCMCの初期状態をサンプリング
+            let max_log_likelihood = states
+                .iter()
+                .map(|s| s.log_likelihood)
+                .fold(f64::MIN, f64::max);
+            let weights = states
+                .iter()
+                .map(|s| (s.log_likelihood - max_log_likelihood).exp())
+                .collect_vec();
+            let dist = WeightedIndex::new(weights).unwrap();
+            let state_i = dist.sample(&mut rng);
+            let state = states[state_i].clone();
 
-            let mut states = mcmc(&env, state, mcmc_duration, &mut rng);
+            let mut sampled_states = mcmc(&env, state, mcmc_duration, &mut rng);
+            states.append(&mut sampled_states);
             states.sort_unstable();
             states.dedup();
             states
                 .sort_unstable_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
 
             let state = &states[0];
-            next_start = state.shift.clone();
             let ratio = if states.len() >= 2 {
                 (state.log_likelihood - states[1].log_likelihood).exp()
             } else {
@@ -83,8 +115,14 @@ impl Solver for MultiDigSolver {
 
             self.judge.comment_colors(&map);
 
-            if ratio >= 100.0 {
+            if ratio >= ANSWER_THRESHOLD_RATIO {
                 if self.judge.answer(&state.to_answer(input)).is_ok() {
+                    return;
+                }
+            } else if self.judge.remaining_query_count() <= 10
+                && self.judge.remaining_query_count() <= states.len()
+            {
+                if self.answer_all(&states, input).is_ok() {
                     return;
                 }
             }
@@ -98,7 +136,20 @@ impl Solver for MultiDigSolver {
                 .collect_vec();
             let sampled = self.judge.query_multiple(&targets);
             let observation = Observation::new(targets, sampled, input);
+
             env.add_observation(input, observation);
+
+            for state in states.iter_mut() {
+                state.add_last_observation(&env);
+            }
+
+            let max_log_likelihood = states
+                .iter()
+                .map(|s| s.log_likelihood)
+                .fold(f64::MIN, f64::max);
+
+            let retain_threshold = ANSWER_THRESHOLD_RATIO.ln();
+            states.retain(|s| max_log_likelihood - s.log_likelihood <= retain_threshold);
         }
     }
 }
@@ -107,8 +158,12 @@ impl Solver for MultiDigSolver {
 struct Env<'a> {
     input: &'a Input,
     observations: Vec<Observation>,
+    /// indices[oil_i][shift] := 影響する (obs_i, count) のVec
     relative_observation_indices: Vec<Map2d<Vec<(usize, usize)>>>,
+    /// indices[obs_i] := 影響する (oil_i, count, shift) のVec
     inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
+    /// matrix[obs_i][oil_i][shift] := oil_iをshiftだけ動かした領域とobs_iの重なりの数
+    overlaps: Vec<Vec<Map2d<usize>>>,
 }
 
 impl<'a> Env<'a> {
@@ -118,12 +173,14 @@ impl<'a> Env<'a> {
             .collect();
         let observations = vec![];
         let inv_relative_observation_indices = vec![];
+        let overlaps = vec![];
 
         Self {
             input,
             observations,
             relative_observation_indices,
             inv_relative_observation_indices,
+            overlaps,
         }
     }
 
@@ -136,8 +193,11 @@ impl<'a> Env<'a> {
         }
 
         let mut inv_relative_observation_indices = vec![];
+        let mut overlaps = vec![];
 
         for (oil_i, oil) in input.oils.iter().enumerate() {
+            let mut overlap = Map2d::new_with(0, input.map_size);
+
             for row in 0..=input.map_size - oil.height {
                 for col in 0..=input.map_size - oil.width {
                     let c = Coord::new(row, col);
@@ -152,17 +212,22 @@ impl<'a> Env<'a> {
                         }
                     }
 
+                    overlap[c] = count;
+
                     if count > 0 {
                         self.relative_observation_indices[oil_i][c].push((obs_id, count));
                         inv_relative_observation_indices.push((oil_i, count, shift));
                     }
                 }
             }
+
+            overlaps.push(overlap);
         }
 
         self.inv_relative_observation_indices
             .push(inv_relative_observation_indices);
         self.observations.push(observation);
+        self.overlaps.push(overlaps);
     }
 }
 
@@ -287,6 +352,22 @@ impl State {
         }
 
         log_likelihood
+    }
+
+    fn add_last_observation(&mut self, env: &Env) {
+        assert!(self.counts.len() + 1 == env.observations.len());
+
+        let mut count = 0;
+        let overlaps = env.overlaps.last().unwrap();
+        let observation = env.observations.last().unwrap();
+
+        for (&shift, overlap) in self.shift.iter().zip(overlaps.iter()) {
+            count += overlap[Coord::try_from(shift).unwrap()];
+        }
+
+        self.log_likelihood += observation.log_likelihoods[count];
+
+        self.counts.push(count);
     }
 
     fn calc_log_likelihood(&self) -> f64 {
