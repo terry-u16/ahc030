@@ -293,7 +293,7 @@ impl State {
         self.log_likelihood
     }
 
-    fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+    fn neigh1(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
 
@@ -347,6 +347,144 @@ impl State {
         self.normalize(&env.input);
 
         self
+    }
+
+    fn neigh2(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+        let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
+        oil_indices.shuffle(rng);
+
+        for &oil_i in oil_indices.iter() {
+            let oil = &env.input.oils[oil_i];
+            self.remove_oil(env, oil_i);
+
+            // 消したままだと貪欲の判断基準がおかしくなるので、ランダムな適当な場所に置いておく
+            let height = env.input.map_size - oil.height + 1;
+            let width = env.input.map_size - oil.width + 1;
+            let dr = rng.gen_range(0..height) as isize;
+            let dc = rng.gen_range(0..width) as isize;
+            let shift = CoordDiff::new(dr, dc);
+            self.add_oil(env, oil_i, shift);
+        }
+
+        let mut candidates_all = vec![];
+
+        // 各油田について置き場所の候補をceil(((N - w + 1)(N - h + 1))^(1/m) / 2)個に絞り込む
+        for &oil_i in oil_indices.iter() {
+            let height = env.input.map_size - env.input.oils[oil_i].height + 1;
+            let width = env.input.map_size - env.input.oils[oil_i].width + 1;
+            let candidate_count = height * width;
+            let mut shifts = Vec::with_capacity(candidate_count);
+            let mut log_likelihoods = Vec::with_capacity(candidate_count);
+            let mut max_log_likelihood = f64::NEG_INFINITY;
+
+            // 一旦消す
+            let prev_shift = self.shift[oil_i];
+            self.remove_oil(env, oil_i);
+
+            for row in 0..height {
+                for col in 0..width {
+                    let shift = CoordDiff::new(row as isize, col as isize);
+                    let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
+                    shifts.push(shift);
+                    log_likelihoods.push(log_likelihood);
+                    max_log_likelihood.change_max(log_likelihood);
+                }
+            }
+
+            let mut cand_i = (0..log_likelihoods.len()).collect_vec();
+            cand_i.sort_unstable_by(|&a, &b| {
+                log_likelihoods[b].partial_cmp(&log_likelihoods[a]).unwrap()
+            });
+
+            let cand_len = ((cand_i.len() as f64).powf(1.0 / choose_cnt as f64)).ceil() as usize;
+
+            if cand_i.len() > cand_len {
+                cand_i.truncate(cand_len);
+            }
+
+            let shifts = cand_i.iter().map(|&i| shifts[i]).collect_vec();
+            candidates_all.push(shifts);
+
+            self.add_oil(env, oil_i, prev_shift);
+        }
+
+        // DFSで絞り込んだ候補を全探索
+        for &i in oil_indices.iter() {
+            self.remove_oil(env, i);
+        }
+
+        let mut current_shifts = vec![];
+        let mut all_shifts = vec![];
+        let mut all_log_likeklihoods = vec![];
+
+        self.dfs(
+            env,
+            &oil_indices,
+            &candidates_all,
+            &mut current_shifts,
+            &mut all_shifts,
+            &mut all_log_likeklihoods,
+            0,
+        );
+
+        let max_log_likelihood = all_log_likeklihoods
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        let likelihoods = all_log_likeklihoods
+            .iter()
+            .map(|&log_likelihood| f64::exp(log_likelihood - max_log_likelihood))
+            .collect_vec();
+
+        let dist = WeightedIndex::new(likelihoods).unwrap();
+        let sample_i = dist.sample(rng);
+        let best_shifts = all_shifts.swap_remove(sample_i);
+
+        for (i, &shift) in best_shifts.iter().enumerate() {
+            self.add_oil(env, oil_indices[i], shift);
+        }
+
+        self.normalize(&env.input);
+
+        self
+    }
+
+    fn dfs(
+        &mut self,
+        env: &Env,
+        oil_i: &[usize],
+        candidates_all: &[Vec<CoordDiff>],
+        current_shifts: &mut Vec<CoordDiff>,
+        all_shifts: &mut Vec<Vec<CoordDiff>>,
+        all_log_likelihoods: &mut Vec<f64>,
+        depth: usize,
+    ) {
+        if depth == candidates_all.len() {
+            all_shifts.push(current_shifts.clone());
+            all_log_likelihoods.push(self.calc_log_likelihood());
+            return;
+        }
+
+        let current_oil_i = oil_i[depth];
+
+        for &shift in &candidates_all[depth] {
+            self.add_oil(env, current_oil_i, shift);
+            current_shifts.push(shift);
+
+            self.dfs(
+                env,
+                oil_i,
+                candidates_all,
+                current_shifts,
+                all_shifts,
+                all_log_likelihoods,
+                depth + 1,
+            );
+
+            current_shifts.pop();
+            self.remove_oil(env, current_oil_i);
+        }
     }
 
     fn normalize(&mut self, input: &Input) {
@@ -442,7 +580,8 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![0, 10, 60, 10]).unwrap();
+    let oil_count_dist1 = WeightedAliasIndex::new(vec![0, 10, 60, 10]).unwrap();
+    let oil_count_dist2 = WeightedAliasIndex::new(vec![0, 0, 50, 50]).unwrap();
 
     loop {
         let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
@@ -454,8 +593,13 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
         all_iter += 1;
 
         // 変形
-        let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
-        let new_state = state.clone().neigh(env, rng, oil_count);
+        let new_state = if rng.gen_bool(0.5) {
+            let oil_count = oil_count_dist1.sample(rng).min(env.input.oil_count);
+            state.clone().neigh1(env, rng, oil_count)
+        } else {
+            let oil_count = oil_count_dist2.sample(rng).min(env.input.oil_count);
+            state.clone().neigh2(env, rng, oil_count)
+        };
 
         // スコア計算
         let log_likelihood_diff = new_state.calc_log_likelihood() - state.calc_log_likelihood();
