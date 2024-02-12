@@ -87,6 +87,14 @@ impl std::ops::Add<CoordDiff> for Coord {
     }
 }
 
+impl std::ops::Add<CoordDiff> for CoordDiff {
+    type Output = CoordDiff;
+
+    fn add(self, rhs: CoordDiff) -> Self::Output {
+        CoordDiff::new(self.dr + rhs.dr, self.dc + rhs.dc)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct CoordIndex(pub usize);
 
