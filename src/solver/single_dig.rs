@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use itertools::Itertools as _;
 use rand::{seq::SliceRandom as _, Rng};
 use rand_core::SeedableRng as _;
@@ -16,30 +14,24 @@ use crate::{
 use super::Solver;
 
 pub struct SingleDigSolver {
-    duration: Duration,
+    judge: Judge,
 }
 
 impl SingleDigSolver {
-    pub fn new(duration: Duration) -> Self {
-        Self { duration }
+    pub fn new(judge: Judge) -> Self {
+        Self { judge }
     }
 }
 
 impl Solver for SingleDigSolver {
-    fn solve(&mut self, input: &crate::problem::Input, judge: &mut Judge) -> Result<(), ()> {
+    fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
 
-        let each_duration = self.duration / (input.map_size * input.map_size) as u32;
+        let each_duration = 2.0 / (input.map_size * input.map_size) as f64;
         let mut next_pos = None;
-        let since = Instant::now();
 
         for turn in 0..input.map_size * input.map_size {
-            // TLE緊急回避モード
-            if !judge.can_query() || since.elapsed() >= self.duration {
-                return Err(());
-            }
-
             let state = State::new(
                 vec![CoordDiff::new(0, 0); input.oil_count],
                 env.map.clone(),
@@ -47,12 +39,19 @@ impl Solver for SingleDigSolver {
             );
             let state = state.neigh(input, &mut rng, input.oil_count);
 
-            let solutions = climbing(&env, state, each_duration.as_secs_f64());
+            let solutions = climbing(&env, state, each_duration);
             let candidates_len = solutions.len();
             eprintln!("turn: {}, solutions: {}", turn, candidates_len);
 
             let solutions = solutions.into_iter().collect_vec();
-            color_map(&solutions, &mut rng, &env, input, candidates_len, judge);
+            color_map(
+                &solutions,
+                &mut rng,
+                &env,
+                input,
+                candidates_len,
+                &mut self.judge,
+            );
 
             if candidates_len == 1 {
                 let solution = solutions.iter().next().unwrap();
@@ -61,12 +60,12 @@ impl Solver for SingleDigSolver {
                 if solution.calc_score() == 0 {
                     let answer = solution.to_answer(input);
 
-                    if judge.answer(&answer).is_ok() {
-                        return Ok(());
+                    if self.judge.answer(&answer).is_ok() {
+                        return;
                     }
                 }
             } else if solutions.len() >= 2 {
-                next_pos = choose_next_pos(solutions, &mut rng, input, &env, judge);
+                next_pos = choose_next_pos(solutions, &mut rng, input, &env, &mut self.judge);
             }
 
             let coord = next_pos.take().unwrap_or_else(|| loop {
@@ -79,7 +78,7 @@ impl Solver for SingleDigSolver {
                 }
             });
 
-            env.map[coord] = Some(judge.query_single(coord));
+            env.map[coord] = Some(self.judge.query_single(coord));
         }
 
         let mut answer = vec![];
@@ -88,19 +87,13 @@ impl Solver for SingleDigSolver {
             for col in 0..input.map_size {
                 let c = Coord::new(row, col);
 
-                if let Some(v) = env.map[c] {
-                    if v > 0 {
-                        answer.push(c);
-                    } else {
-                        return Err(());
-                    }
+                if env.map[c].unwrap() > 0 {
+                    answer.push(c);
                 }
             }
         }
 
-        judge.answer(&answer).unwrap();
-
-        Ok(())
+        self.judge.answer(&answer).unwrap();
     }
 }
 
