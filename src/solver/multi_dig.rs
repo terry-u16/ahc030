@@ -288,7 +288,16 @@ impl State {
         oil_indices.shuffle(rng);
 
         for &oil_i in oil_indices.iter() {
+            let oil = &env.input.oils[oil_i];
             self.remove_oil(env, oil_i);
+
+            // 消したままだと貪欲の判断基準がおかしくなるので、ランダムな適当な場所に置いておく
+            let height = env.input.map_size - oil.height + 1;
+            let width = env.input.map_size - oil.width + 1;
+            let dr = rng.gen_range(0..height) as isize;
+            let dc = rng.gen_range(0..width) as isize;
+            let shift = CoordDiff::new(dr, dc);
+            self.add_oil(env, oil_i, shift);
         }
 
         // ランダム性を入れた貪欲で場所を決めていく
@@ -299,6 +308,9 @@ impl State {
             let mut shifts = Vec::with_capacity(candidate_count);
             let mut log_likelihoods = Vec::with_capacity(candidate_count);
             let mut max_log_likelihood = f64::NEG_INFINITY;
+
+            // 消し直す
+            self.remove_oil(env, oil_i);
 
             for row in 0..height {
                 for col in 0..width {
@@ -423,14 +435,13 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
     let oil_count_dist = WeightedAliasIndex::new(vec![10, 60, 20, 10]).unwrap();
 
     loop {
-        all_iter += 1;
-        if (all_iter & ((1 << 4) - 1)) == 0 {
-            let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
+        let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
 
-            if time >= 1.0 {
-                break;
-            }
+        if time >= 1.0 {
+            break;
         }
+        
+        all_iter += 1;
 
         // 変形
         let oil_count = (oil_count_dist.sample(rng) + 1).min(env.input.oil_count);
