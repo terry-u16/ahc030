@@ -19,7 +19,7 @@ fn main() {
     let mut judge = Judge::new();
     let input = judge.read_input();
 
-    judge.set_query_limit(input.map_size * input.map_size * 3 / 2);
+    judge.set_query_limit(input.map_size * input.map_size - 10);
 
     if input.eps <= 0.15 && input.oil_count <= 12 {
         let mut solver = solver::multi_dig::MultiDigSolver::new(Duration::from_millis(2000));

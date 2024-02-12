@@ -157,10 +157,6 @@ impl Judge {
         self.query_count < self.query_limit
     }
 
-    pub fn remaining_queries(&self) -> usize {
-        self.query_limit - self.query_count
-    }
-
     pub fn query_single(&mut self, coord: Coord) -> i32 {
         if self.query_count >= self.query_limit {
             // do nothing

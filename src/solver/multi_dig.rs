@@ -36,7 +36,7 @@ impl Solver for MultiDigSolver {
             .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
             .collect_vec();
         let mut rng = Pcg64Mcg::from_entropy();
-        let mcmc_duration = self.duration / judge.remaining_queries() as u32;
+        let mcmc_duration = self.duration / input.map_size.pow(2) as u32;
         let mut next_start = vec![CoordDiff::new(0, 0); input.oil_count];
         let since = Instant::now();
 
