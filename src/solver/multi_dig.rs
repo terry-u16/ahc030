@@ -7,8 +7,8 @@ use rand_core::SeedableRng;
 use rand_distr::{Distribution, WeightedAliasIndex, WeightedIndex};
 use rand_pcg::Pcg64Mcg;
 use rustc_hash::FxHashMap;
-use std::hash::Hash;
 use std::vec;
+use std::{hash::Hash, time::Instant};
 
 use crate::{
     common::ChangeMinMax,
@@ -38,8 +38,18 @@ impl Solver for MultiDigSolver {
         let mut rng = Pcg64Mcg::from_entropy();
         let mcmc_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
         let mut next_start = vec![CoordDiff::new(0, 0); input.oil_count];
+        let since = Instant::now();
 
         for _ in 0..input.map_size * input.map_size * 2 {
+            // TLE緊急回避モード
+            if since.elapsed().as_secs_f64() >= 2.8 {
+                for _ in 0..input.map_size * input.map_size * 2 {
+                    self.judge.query_single(Coord::new(0, 0));
+                }
+
+                return;
+            }
+
             let state = State::new(next_start, &env);
 
             let mut states = mcmc(&env, state, mcmc_duration, &mut rng);
@@ -432,7 +442,7 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![10, 60, 20, 10]).unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![0, 10, 60, 10]).unwrap();
 
     loop {
         let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
@@ -440,11 +450,11 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
         if time >= 1.0 {
             break;
         }
-        
+
         all_iter += 1;
 
         // 変形
-        let oil_count = (oil_count_dist.sample(rng) + 1).min(env.input.oil_count);
+        let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
         let new_state = state.clone().neigh(env, rng, oil_count);
 
         // スコア計算
