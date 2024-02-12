@@ -246,7 +246,7 @@ impl Judge {
                 for col in 0..colors.size {
                     let c = Coord::new(row, col);
                     let v = ((1.0 - colors[c].clamp(0.0, 1.0)) * 255.0).round() as u8;
-                    let color = format!("#{:02x}{:02x}{:02x}", 255, v, v);
+                    let color = format!("#{:02x}{:02x}{:02x}", v, v, 255);
                     println!("#c {row} {col} {color}");
                 }
             }

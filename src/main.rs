@@ -8,7 +8,7 @@ mod solver;
 use proconio::*;
 #[allow(unused_imports)]
 use rand::prelude::*;
-use solver::Solver;
+use solver::{bayesian::BayesianSolver, Solver};
 
 use crate::problem::Judge;
 
