@@ -7,8 +7,8 @@ use rand_core::SeedableRng;
 use rand_distr::{Distribution, WeightedAliasIndex, WeightedIndex};
 use rand_pcg::Pcg64Mcg;
 use rustc_hash::FxHashMap;
-use std::vec;
 use std::{hash::Hash, time::Instant};
+use std::{time::Duration, vec};
 
 use crate::{
     common::ChangeMinMax,
@@ -20,39 +20,35 @@ use crate::{
 use super::Solver;
 
 pub struct MultiDigSolver {
-    judge: Judge,
+    duration: Duration,
 }
 
 impl MultiDigSolver {
-    pub fn new(judge: Judge) -> Self {
-        Self { judge }
+    pub fn new(duration: Duration) -> Self {
+        Self { duration }
     }
 }
 
 impl Solver for MultiDigSolver {
-    fn solve(&mut self, input: &crate::problem::Input) {
+    fn solve(&mut self, input: &crate::problem::Input, judge: &mut Judge) -> Result<(), ()> {
         let mut env = Env::new(input);
         let all_coords = (0..input.map_size)
             .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
             .collect_vec();
         let mut rng = Pcg64Mcg::from_entropy();
-        let mcmc_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
+        let mcmc_duration = self.duration / input.map_size.pow(2) as u32;
         let mut next_start = vec![CoordDiff::new(0, 0); input.oil_count];
         let since = Instant::now();
 
         for _ in 0..input.map_size * input.map_size * 2 {
             // TLE緊急回避モード
-            if since.elapsed().as_secs_f64() >= 2.8 {
-                for _ in 0..input.map_size * input.map_size * 2 {
-                    self.judge.query_single(Coord::new(0, 0));
-                }
-
-                return;
+            if !judge.can_query() || since.elapsed() >= self.duration {
+                return Err(());
             }
 
             let state = State::new(next_start, &env);
 
-            let mut states = mcmc(&env, state, mcmc_duration, &mut rng);
+            let mut states = mcmc(&env, state, mcmc_duration.as_secs_f64(), &mut rng);
             states.sort_unstable();
             states.dedup();
             states
@@ -66,7 +62,7 @@ impl Solver for MultiDigSolver {
                 f64::INFINITY
             };
 
-            self.judge.comment(&format!(
+            judge.comment(&format!(
                 "found: {} log_likelihood: {:.3}, ratio: {:.3}",
                 states.len(),
                 state.log_likelihood,
@@ -81,11 +77,11 @@ impl Solver for MultiDigSolver {
                 }
             }
 
-            self.judge.comment_colors(&map);
+            judge.comment_colors(&map);
 
             if ratio >= 100.0 {
-                if self.judge.answer(&state.to_answer(input)).is_ok() {
-                    return;
+                if judge.answer(&state.to_answer(input)).is_ok() {
+                    return Ok(());
                 }
             }
 
@@ -96,10 +92,12 @@ impl Solver for MultiDigSolver {
                 .choose_multiple(&mut rng, count)
                 .copied()
                 .collect_vec();
-            let sampled = self.judge.query_multiple(&targets);
+            let sampled = judge.query_multiple(&targets);
             let observation = Observation::new(targets, sampled, input);
             env.add_observation(input, observation);
         }
+
+        return Err(());
     }
 }
 

@@ -8,6 +8,7 @@ use rustc_hash::FxHashSet;
 use std::{
     cmp::Reverse,
     io::{self, BufReader},
+    time::Instant,
 };
 
 #[derive(Debug, Clone)]
@@ -17,10 +18,12 @@ pub struct Input {
     pub eps: f64,
     pub oils: Vec<Oils>,
     pub hashes: Vec<Map2d<u64>>,
+    pub since: Instant,
 }
 
 impl Input {
     fn new(map_size: usize, oil_count: usize, eps: f64, oils: Vec<Oils>) -> Self {
+        let since = Instant::now();
         let mut counts = HashMap::new();
 
         for oil in &oils {
@@ -49,6 +52,7 @@ impl Input {
             eps,
             oils,
             hashes,
+            since,
         }
     }
 }
@@ -115,7 +119,7 @@ impl Judge {
             eps: f64,
         }
 
-        self.query_limit = n * n * 2;
+        self.set_query_limit(n * n * 2);
 
         let mut oils = vec![];
 
@@ -143,6 +147,14 @@ impl Judge {
         oils.sort_by_key(|o| Reverse(o.len));
 
         Input::new(n, m, eps, oils)
+    }
+
+    pub fn set_query_limit(&mut self, query_limit: usize) {
+        self.query_limit = query_limit;
+    }
+
+    pub fn can_query(&self) -> bool {
+        self.query_count < self.query_limit
     }
 
     pub fn query_single(&mut self, coord: Coord) -> i32 {
