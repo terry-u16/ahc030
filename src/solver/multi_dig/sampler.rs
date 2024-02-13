@@ -468,7 +468,8 @@ fn annealing(
         let new_score = new_state.calc_score(env, prob_table);
         let score_diff = new_score - current_score;
 
-        if score_diff >= 0.0 || rng.gen_bool(f64::exp(score_diff as f64 * inv_temp)) {
+        // 速度が稼げていないので山登りにしている
+        if score_diff >= 0.0 { // || rng.gen_bool(f64::exp(score_diff as f64 * inv_temp)) {
             // 解の更新
             current_score = new_score;
             accepted_count += 1;

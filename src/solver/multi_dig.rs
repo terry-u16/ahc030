@@ -83,7 +83,7 @@ impl Solver for MultiDigSolver {
             let state_i = dist.sample(&mut rng);
             let state = states[state_i].clone();
 
-            let mut sampled_states = mcmc::mcmc(&env, state, turn_duration * 0.8, &mut rng);
+            let mut sampled_states = mcmc::mcmc(&env, state, turn_duration * 0.7, &mut rng);
             states.append(&mut sampled_states);
             states.sort_unstable();
             states.dedup();
@@ -127,7 +127,13 @@ impl Solver for MultiDigSolver {
                 }
             }
 
-            let time_mul = if turn < 20 { 5.0 } else { 1.0 };
+            let time_mul = if turn < 20 {
+                5.0
+            } else if turn < 50 {
+                2.0
+            } else {
+                1.0
+            };
             let max_sample_count = if turn < input.map_size * input.map_size {
                 input.map_size * input.map_size
             } else if turn < input.map_size * input.map_size * 3 / 2 {
@@ -141,7 +147,7 @@ impl Solver for MultiDigSolver {
                 &mut prob_table,
                 states.clone(),
                 max_sample_count,
-                turn_duration * 0.2 * time_mul,
+                turn_duration * 0.3 * time_mul,
                 &mut rng,
             );
             let sampled = self.judge.query_multiple(&targets);
