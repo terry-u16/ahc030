@@ -172,8 +172,8 @@ impl ProbTable {
         let mut right = true_cnt + 1;
         let mut right_p = f(true_cnt + 1);
 
-        // ±3σ分をカバーできる範囲を計算
-        while sum_p < 0.997 {
+        // ±4σ分をカバーできる範囲を計算
+        while sum_p < 0.99994 {
             if left_p >= right_p {
                 let l = left.unwrap();
                 let p_ln = left_p.ln();
