@@ -17,19 +17,22 @@ pub(super) fn select_sample_points(
     input: &Input,
     prob_table: &mut ProbTable,
     mcmc_states: Vec<mcmc::State>,
+    max_sample_count: usize,
     duration: f64,
     rng: &mut impl Rng,
 ) -> Vec<Coord> {
+    assert!(max_sample_count > 0);
+    assert!(input.map_size * input.map_size >= max_sample_count);
     let all_coords = (0..input.map_size)
         .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
         .collect::<Vec<_>>();
-    let sample_count = (input.map_size * input.map_size) * 3 / 4;
+    let sample_count = max_sample_count / 2;
     let sampled_coords = all_coords
         .choose_multiple(rng, sample_count)
         .copied()
         .collect_vec();
 
-    let Ok(env) = Env::new(input, mcmc_states) else {
+    let Ok(env) = Env::new(input, mcmc_states, max_sample_count) else {
         // エントロピーを計算できないのでランダムなものを返す
         return sampled_coords;
     };
@@ -212,19 +215,24 @@ struct Env<'a> {
     state_maps: Vec<Map2d<usize>>,
     probs: Vec<f64>,
     base_entropy: f64,
+    max_sample_count: usize,
 }
 
 impl<'a> Env<'a> {
     const MAX_STATE_COUNT: usize = 20;
 
-    fn new(input: &'a Input, mut states: Vec<mcmc::State>) -> Result<Self, ()> {
+    fn new(
+        input: &'a Input,
+        mut states: Vec<mcmc::State>,
+        max_sample_count: usize,
+    ) -> Result<Self, ()> {
         if states.len() <= 1 {
             return Err(());
         }
 
         states.sort_unstable_by_key(|s| Reverse(OrderedFloat(s.log_likelihood)));
 
-        // 適当に尤度の大きい上位10つを選ぶ
+        // 適当に尤度の大きい上位MAX_STATE_COUNT個を選ぶ
         if states.len() > Self::MAX_STATE_COUNT {
             states.truncate(Self::MAX_STATE_COUNT);
         }
@@ -266,6 +274,7 @@ impl<'a> Env<'a> {
             state_maps,
             probs,
             base_entropy,
+            max_sample_count,
         })
     }
 }
@@ -303,7 +312,7 @@ impl State {
             let n2 = env.input.map_size * env.input.map_size;
 
             if (self.selected_count <= 1 && self.map[c])
-                || (self.selected_count >= n2 - 1 && !self.map[c])
+                || (self.selected_count >= env.max_sample_count && !self.map[c])
             {
                 continue;
             }
@@ -323,17 +332,27 @@ impl State {
         self
     }
 
-    fn neigh_flip_all(mut self, env: &Env) -> Self {
-        let new_selected_count = env.input.map_size * env.input.map_size - self.selected_count;
-
-        for row in 0..env.input.map_size {
-            for col in 0..env.input.map_size {
-                let c = Coord::new(row, col);
-                self.map[c] ^= true;
+    fn neigh_flip_double(mut self, env: &Env, rng: &mut impl Rng) -> Self {
+        let c0 = loop {
+            let row = rng.gen_range(0..env.input.map_size);
+            let col = rng.gen_range(0..env.input.map_size);
+            let c = Coord::new(row, col);
+            if self.map[c] {
+                break c;
             }
-        }
+        };
 
-        self.selected_count = new_selected_count;
+        let c1 = loop {
+            let row = rng.gen_range(0..env.input.map_size);
+            let col = rng.gen_range(0..env.input.map_size);
+            let c = Coord::new(row, col);
+            if !self.map[c] {
+                break c;
+            }
+        };
+
+        self.map[c0] ^= true;
+        self.map[c1] ^= true;
         self.conditional_entropy = None;
 
         self
@@ -439,10 +458,10 @@ fn annealing(
         }
 
         // 変形
-        let mut new_state = if rng.gen_bool(0.98) {
+        let mut new_state = if rng.gen_bool(0.5) {
             solution.clone().neigh_flip_single(env, rng)
         } else {
-            solution.clone().neigh_flip_all(env)
+            solution.clone().neigh_flip_double(env, rng)
         };
 
         // スコア計算

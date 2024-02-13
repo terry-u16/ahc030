@@ -127,11 +127,19 @@ impl Solver for MultiDigSolver {
             }
 
             let time_mul = if turn < 20 { 5.0 } else { 1.0 };
+            let max_sample_count = if turn < input.map_size * input.map_size {
+                input.map_size * input.map_size
+            } else if turn < input.map_size * input.map_size * 3 / 2 {
+                input.map_size * input.map_size / 8
+            } else {
+                input.map_size * input.map_size / 32
+            };
 
             let targets = sampler::select_sample_points(
                 input,
                 &mut prob_table,
                 states.clone(),
+                max_sample_count,
                 turn_duration * 0.2 * time_mul,
                 &mut rng,
             );
