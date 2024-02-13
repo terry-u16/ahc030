@@ -35,7 +35,7 @@ pub(super) fn select_sample_points(
     };
 
     let state = State::new(&env, &sampled_coords);
-    let state = annealing(&env, state, prob_table, duration);
+    let state = annealing(&env, state, prob_table, duration, rng);
 
     let mut result = vec![];
 
@@ -212,6 +212,7 @@ struct Env<'a> {
     state_maps: Vec<Map2d<usize>>,
     probs: Vec<f64>,
     base_entropy: f64,
+    min_selected_count: usize,
 }
 
 impl<'a> Env<'a> {
@@ -260,12 +261,15 @@ impl<'a> Env<'a> {
             base_entropy -= prob * prob.log2();
         }
 
+        let min_selected_count = input.map_size * input.map_size / 4;
+
         Ok(Self {
             input,
             states,
             state_maps,
             probs,
             base_entropy,
+            min_selected_count,
         })
     }
 }
@@ -294,7 +298,7 @@ impl State {
         }
     }
 
-    fn neigh(mut self, env: &Env, rng: &mut impl Rng) -> Self {
+    fn neigh_flip_single(mut self, env: &Env, rng: &mut impl Rng) -> Self {
         let coord = loop {
             let row = rng.gen_range(0..env.input.map_size);
             let col = rng.gen_range(0..env.input.map_size);
@@ -302,7 +306,7 @@ impl State {
 
             let n2 = env.input.map_size * env.input.map_size;
 
-            if (self.selected_count <= 1 && self.map[c])
+            if (self.selected_count <= env.min_selected_count && self.map[c])
                 || (self.selected_count >= n2 - 1 && !self.map[c])
             {
                 continue;
@@ -321,6 +325,26 @@ impl State {
         self.conditional_entropy = None;
 
         self
+    }
+
+    fn neigh_flip_all(mut self, env: &Env) -> Option<Self> {
+        let new_selected_count = env.input.map_size * env.input.map_size - self.selected_count;
+
+        if new_selected_count < env.min_selected_count {
+            return None;
+        }
+
+        for row in 0..env.input.map_size {
+            for col in 0..env.input.map_size {
+                let c = Coord::new(row, col);
+                self.map[c] ^= true;
+            }
+        }
+
+        self.selected_count = new_selected_count;
+        self.conditional_entropy = None;
+
+        Some(self)
     }
 
     /// 相互情報量を計算する
@@ -390,6 +414,7 @@ fn annealing(
     initial_solution: State,
     prob_table: &mut ProbTable,
     duration: f64,
+    rng: &mut impl Rng,
 ) -> State {
     let mut solution = initial_solution;
     let mut best_solution = solution.clone();
@@ -401,13 +426,12 @@ fn annealing(
     let mut valid_iter = 0;
     let mut accepted_count = 0;
     let mut update_count = 0;
-    let mut rng = rand_pcg::Pcg64Mcg::new(42);
 
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
     let temp0 = 1e-2;
-    let temp1 = 1e-5;
+    let temp1 = 1e-4;
     let mut inv_temp = 1.0 / temp0;
 
     loop {
@@ -423,7 +447,15 @@ fn annealing(
         }
 
         // 変形
-        let mut new_state = solution.clone().neigh(env, &mut rng);
+        let mut new_state = if rng.gen_bool(0.98) {
+            solution.clone().neigh_flip_single(env, rng)
+        } else {
+            let Some(s) = solution.clone().neigh_flip_all(env) else {
+                continue;
+            };
+
+            s
+        };
 
         // スコア計算
         let new_score = new_state.calc_score(env, prob_table);

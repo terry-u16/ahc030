@@ -46,7 +46,7 @@ impl Solver for MultiDigSolver {
             .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
             .collect_vec();
         let mut rng = Pcg64Mcg::from_entropy();
-        let mcmc_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
+        let turn_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
         let since = Instant::now();
         let mut states = vec![State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
@@ -56,7 +56,7 @@ impl Solver for MultiDigSolver {
 
         const ANSWER_THRESHOLD_RATIO: f64 = 100.0;
 
-        for _ in 0..input.map_size * input.map_size * 2 {
+        for turn in 0..input.map_size * input.map_size * 2 {
             // TLE緊急回避モード
             if since.elapsed().as_secs_f64() >= 2.8 {
                 if self.answer_all(&states, input).is_ok() {
@@ -83,7 +83,7 @@ impl Solver for MultiDigSolver {
             let state_i = dist.sample(&mut rng);
             let state = states[state_i].clone();
 
-            let mut sampled_states = mcmc::mcmc(&env, state, mcmc_duration * 0.8, &mut rng);
+            let mut sampled_states = mcmc::mcmc(&env, state, turn_duration * 0.8, &mut rng);
             states.append(&mut sampled_states);
             states.sort_unstable();
             states.dedup();
@@ -126,11 +126,13 @@ impl Solver for MultiDigSolver {
                 }
             }
 
+            let time_mul = if turn < 20 { 5.0 } else { 1.0 };
+
             let targets = sampler::select_sample_points(
                 input,
                 &mut prob_table,
                 states.clone(),
-                mcmc_duration * 0.2,
+                turn_duration * 0.2 * time_mul,
                 &mut rng,
             );
             let sampled = self.judge.query_multiple(&targets);
