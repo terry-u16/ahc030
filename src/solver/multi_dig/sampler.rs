@@ -23,7 +23,7 @@ pub(super) fn select_sample_points(
     let all_coords = (0..input.map_size)
         .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
         .collect::<Vec<_>>();
-    let sample_count = (input.map_size * input.map_size) / 2;
+    let sample_count = (input.map_size * input.map_size) * 3 / 4;
     let sampled_coords = all_coords
         .choose_multiple(rng, sample_count)
         .copied()
@@ -212,7 +212,6 @@ struct Env<'a> {
     state_maps: Vec<Map2d<usize>>,
     probs: Vec<f64>,
     base_entropy: f64,
-    min_selected_count: usize,
 }
 
 impl<'a> Env<'a> {
@@ -261,15 +260,12 @@ impl<'a> Env<'a> {
             base_entropy -= prob * prob.log2();
         }
 
-        let min_selected_count = input.map_size * input.map_size / 4;
-
         Ok(Self {
             input,
             states,
             state_maps,
             probs,
             base_entropy,
-            min_selected_count,
         })
     }
 }
@@ -306,7 +302,7 @@ impl State {
 
             let n2 = env.input.map_size * env.input.map_size;
 
-            if (self.selected_count <= env.min_selected_count && self.map[c])
+            if (self.selected_count <= 1 && self.map[c])
                 || (self.selected_count >= n2 - 1 && !self.map[c])
             {
                 continue;
@@ -327,12 +323,8 @@ impl State {
         self
     }
 
-    fn neigh_flip_all(mut self, env: &Env) -> Option<Self> {
+    fn neigh_flip_all(mut self, env: &Env) -> Self {
         let new_selected_count = env.input.map_size * env.input.map_size - self.selected_count;
-
-        if new_selected_count < env.min_selected_count {
-            return None;
-        }
 
         for row in 0..env.input.map_size {
             for col in 0..env.input.map_size {
@@ -344,7 +336,7 @@ impl State {
         self.selected_count = new_selected_count;
         self.conditional_entropy = None;
 
-        Some(self)
+        self
     }
 
     /// 相互情報量を計算する
@@ -404,7 +396,7 @@ impl State {
     /// スコアは大きいほどよい
     fn calc_score(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
         let mutual_information = env.base_entropy - self.calc_conditional_entropy(env, prob_table);
-        let score = mutual_information / (self.selected_count as f64).sqrt();
+        let score = mutual_information * (self.selected_count as f64).sqrt();
         score
     }
 }
@@ -450,11 +442,7 @@ fn annealing(
         let mut new_state = if rng.gen_bool(0.98) {
             solution.clone().neigh_flip_single(env, rng)
         } else {
-            let Some(s) = solution.clone().neigh_flip_all(env) else {
-                continue;
-            };
-
-            s
+            solution.clone().neigh_flip_all(env)
         };
 
         // スコア計算
