@@ -233,8 +233,8 @@ pub fn parse_output(input: &Input, f: &str) -> Result<Output, String> {
         if ty == "a" {
             let mut ps = vec![];
             for _ in 0..num {
-                let x = read(ss.next(), 0, input.n)?;
-                let y = read(ss.next(), 0, input.n)?;
+                let x = read(ss.next(), 0, input.n - 1)?;
+                let y = read(ss.next(), 0, input.n - 1)?;
                 ps.push((x, y));
             }
             ps.sort();
@@ -252,14 +252,14 @@ pub fn parse_output(input: &Input, f: &str) -> Result<Output, String> {
         } else if ty == "q" {
             let _resp = if num == 1 {
                 sim.query(Query::Mining((
-                    read(ss.next(), 0, input.n)?,
-                    read(ss.next(), 0, input.n)?,
+                    read(ss.next(), 0, input.n - 1)?,
+                    read(ss.next(), 0, input.n - 1)?,
                 )))
             } else {
                 let mut ps = vec![];
                 for _ in 0..num {
-                    let x = read(ss.next(), 0, input.n)?;
-                    let y = read(ss.next(), 0, input.n)?;
+                    let x = read(ss.next(), 0, input.n - 1)?;
+                    let y = read(ss.next(), 0, input.n - 1)?;
                     ps.push((x, y));
                 }
                 ps.sort();
@@ -609,8 +609,8 @@ pub fn exec(p: &mut std::process::Child, local: bool) -> Result<i64, String> {
         if ty == "a" {
             let mut ps = vec![];
             for _ in 0..num {
-                let x = read(ss.next(), 0, input.n)?;
-                let y = read(ss.next(), 0, input.n)?;
+                let x = read(ss.next(), 0, input.n - 1)?;
+                let y = read(ss.next(), 0, input.n - 1)?;
                 ps.push((x, y));
             }
             ps.sort();
@@ -630,14 +630,14 @@ pub fn exec(p: &mut std::process::Child, local: bool) -> Result<i64, String> {
         } else if ty == "q" {
             let resp = if num == 1 {
                 sim.query(Query::Mining((
-                    read(ss.next(), 0, input.n)?,
-                    read(ss.next(), 0, input.n)?,
+                    read(ss.next(), 0, input.n - 1)?,
+                    read(ss.next(), 0, input.n - 1)?,
                 )))
             } else {
                 let mut ps = vec![];
                 for _ in 0..num {
-                    let x = read(ss.next(), 0, input.n)?;
-                    let y = read(ss.next(), 0, input.n)?;
+                    let x = read(ss.next(), 0, input.n - 1)?;
+                    let y = read(ss.next(), 0, input.n - 1)?;
                     ps.push((x, y));
                 }
                 ps.sort();
