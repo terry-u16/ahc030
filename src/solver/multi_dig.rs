@@ -1,10 +1,11 @@
 mod mcmc;
+mod sampler;
 
 use crate::{
     distributions::GaussianDistribution,
     grid::{Coord, CoordDiff, Map2d},
     problem::{Input, Judge},
-    solver::multi_dig::mcmc::State,
+    solver::multi_dig::{mcmc::State, sampler::ProbTable},
 };
 use itertools::Itertools;
 use rand::{seq::SliceRandom, Rng};
@@ -51,6 +52,7 @@ impl Solver for MultiDigSolver {
             vec![CoordDiff::new(0, 0); input.oil_count],
             &env,
         )];
+        let mut prob_table = ProbTable::new(input);
 
         const ANSWER_THRESHOLD_RATIO: f64 = 100.0;
 
@@ -81,7 +83,7 @@ impl Solver for MultiDigSolver {
             let state_i = dist.sample(&mut rng);
             let state = states[state_i].clone();
 
-            let mut sampled_states = mcmc::mcmc(&env, state, mcmc_duration, &mut rng);
+            let mut sampled_states = mcmc::mcmc(&env, state, mcmc_duration * 0.8, &mut rng);
             states.append(&mut sampled_states);
             states.sort_unstable();
             states.dedup();
@@ -124,13 +126,13 @@ impl Solver for MultiDigSolver {
                 }
             }
 
-            let count = rng.gen_range(
-                input.map_size * input.map_size / 4..=input.map_size * input.map_size / 2,
+            let targets = sampler::select_sample_points(
+                input,
+                &mut prob_table,
+                states.clone(),
+                mcmc_duration * 0.2,
+                &mut rng,
             );
-            let targets = all_coords
-                .choose_multiple(&mut rng, count)
-                .copied()
-                .collect_vec();
             let sampled = self.judge.query_multiple(&targets);
             let observation = Observation::new(targets, sampled, input);
 
@@ -238,10 +240,25 @@ struct Observation {
 
 impl Observation {
     fn new(pos: Vec<Coord>, sampled: i32, input: &Input) -> Self {
+        assert!(pos.len() > 0);
+
         let likelihoods_len = pos.len() * input.oil_count + 1;
-        let mut log_likelihoods = Vec::with_capacity(likelihoods_len);
         let k = pos.len() as f64;
         let x = sampled as f64;
+
+        // k = 1のときは特別扱い
+        if pos.len() == 1 {
+            let mut log_likelihoods = vec![f64::MIN_POSITIVE.ln(); likelihoods_len];
+            log_likelihoods[sampled as usize] = 0.0;
+
+            return Self {
+                pos,
+                sampled,
+                log_likelihoods,
+            };
+        }
+
+        let mut log_likelihoods = Vec::with_capacity(likelihoods_len);
 
         for true_v in 0..likelihoods_len {
             let v = true_v as f64;

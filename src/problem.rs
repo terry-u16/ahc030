@@ -154,26 +154,11 @@ impl Judge {
     }
 
     pub fn query_single(&mut self, coord: Coord) -> i32 {
-        if self.query_count >= self.query_limit {
-            // do nothing
-            return 0;
-        }
-
-        self.query_count += 1;
-        self.flush_comments();
-
-        println!("q 1 {} {}", coord.row, coord.col);
-
-        input! {
-            from &mut self.source,
-            value: i32
-        }
-
-        value
+        self.query_multiple(&[coord])
     }
 
     pub fn query_multiple(&mut self, coords: &[Coord]) -> i32 {
-        assert!(coords.len() >= 2);
+        assert!(coords.len() > 0);
 
         if self.query_count >= self.query_limit {
             // do nothing
