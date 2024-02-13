@@ -87,6 +87,7 @@ impl Solver for MultiDigSolver {
             states.append(&mut sampled_states);
             states.sort_unstable();
             states.dedup();
+            states.shuffle(&mut rng);
             states
                 .sort_unstable_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
 
