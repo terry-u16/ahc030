@@ -1,6 +1,6 @@
 use crate::{
     common::ChangeMinMax as _,
-    grid::{Coord, CoordDiff, Map2d},
+    grid::{Coord, CoordDiff, Map2d, ADJACENTS},
     problem::Input,
 };
 use itertools::Itertools as _;
@@ -116,7 +116,7 @@ impl State {
         self.log_likelihood
     }
 
-    fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+    fn neigh1(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
 
@@ -167,6 +167,40 @@ impl State {
             self.add_oil(env, oil_i, shift);
         }
 
+        self.normalize(&env.input);
+
+        self
+    }
+
+    fn neigh2(mut self, env: &Env, rng: &mut impl Rng) -> Self {
+        if env
+            .input
+            .oils
+            .iter()
+            .all(|oil| oil.height == env.input.map_size && oil.width == env.input.map_size)
+        {
+            return self;
+        }
+
+        let (oil_i, shift) = loop {
+            let index = rng.gen_range(0..env.input.oil_count);
+            let dr = rng.gen_range(-2..=2);
+            let dc = rng.gen_range(-2..=2);
+            let s = CoordDiff::new(dr, dc);
+            let new_shift = self.shift[index] + s;
+            let oil = &env.input.oils[index];
+
+            if new_shift.dr >= 0
+                && oil.height.wrapping_add_signed(new_shift.dr) <= env.input.map_size
+                && new_shift.dc >= 0
+                && oil.width.wrapping_add_signed(new_shift.dc) <= env.input.map_size
+            {
+                break (index, new_shift);
+            }
+        };
+
+        self.remove_oil(env, oil_i);
+        self.add_oil(env, oil_i, shift);
         self.normalize(&env.input);
 
         self
@@ -265,7 +299,7 @@ pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rn
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![0, 10, 60, 10]).unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![0, 30, 60, 30]).unwrap();
 
     loop {
         let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
@@ -278,7 +312,11 @@ pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rn
 
         // 変形
         let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
-        let new_state = state.clone().neigh(env, rng, oil_count);
+        let new_state = if rng.gen_bool(0.9) {
+            state.clone().neigh1(env, rng, oil_count)
+        } else {
+            state.clone().neigh2(env, rng)
+        };
 
         // スコア計算
         let log_likelihood_diff = new_state.calc_log_likelihood() - state.calc_log_likelihood();
