@@ -1,19 +1,14 @@
-use std::{
-    cmp::Reverse,
-    iter::Map,
-    ops::{Range, RangeInclusive},
-};
-
-use itertools::Itertools;
-use ordered_float::OrderedFloat;
-use rand::{seq::SliceRandom as _, Rng};
-
 use crate::{
     common::ChangeMinMax as _,
+    data_structures::IndexSet,
     distributions::GaussianDistribution,
     grid::{Coord, Map2d},
     problem::Input,
 };
+use itertools::Itertools;
+use ordered_float::OrderedFloat;
+use rand::{seq::SliceRandom as _, Rng};
+use std::{cmp::Reverse, ops::Range};
 
 use super::mcmc::{self};
 
@@ -302,6 +297,8 @@ struct State {
     map: Map2d<bool>,
     selected_count: usize,
     conditional_entropy: Option<f64>,
+    selected: IndexSet,
+    not_selected: IndexSet,
 }
 
 static mut OVERLAP_COUNTS: Vec<usize> = vec![];
@@ -319,32 +316,59 @@ impl State {
 
         let selected_count = selected_coords.len();
 
+        let n2 = env.input.map_size * env.input.map_size;
+        let mut selected = IndexSet::new(n2);
+        let mut not_selected = IndexSet::new(n2);
+
+        for row in 0..env.input.map_size {
+            for col in 0..env.input.map_size {
+                let c = Coord::new(row, col);
+                let i = row * env.input.map_size + col;
+
+                if map[c] {
+                    selected.add(i);
+                } else {
+                    not_selected.add(i);
+                }
+            }
+        }
+
         Self {
             map,
             selected_count,
             conditional_entropy: None,
+            selected,
+            not_selected,
         }
     }
 
     fn neigh_flip_single(mut self, env: &Env, rng: &mut impl Rng) -> Self {
-        let coord = loop {
-            let row = rng.gen_range(0..env.input.map_size);
-            let col = rng.gen_range(0..env.input.map_size);
-            let c = Coord::new(row, col);
-
-            if (self.selected_count <= 1 && self.map[c])
-                || (self.selected_count >= env.max_sample_count && !self.map[c])
-            {
-                continue;
-            }
-
-            break c;
+        let add = if self.selected_count <= 1 {
+            true
+        } else if self.selected_count >= env.max_sample_count {
+            false
+        } else {
+            rng.gen_bool(0.5)
         };
+
+        let index = if add {
+            self.not_selected.as_slice().choose(rng).copied().unwrap()
+        } else {
+            self.selected.as_slice().choose(rng).copied().unwrap()
+        };
+
+        let row = index / env.input.map_size;
+        let col = index % env.input.map_size;
+        let coord = Coord::new(row, col);
 
         if self.map[coord] {
             self.selected_count -= 1;
+            self.selected.remove(index);
+            self.not_selected.add(index);
         } else {
             self.selected_count += 1;
+            self.selected.add(index);
+            self.not_selected.remove(index);
         }
 
         self.map[coord] ^= true;
@@ -354,30 +378,31 @@ impl State {
     }
 
     fn neigh_flip_double(mut self, env: &Env, rng: &mut impl Rng) -> Self {
-        if self.selected_count <= 1 || self.selected_count >= env.max_sample_count {
+        let index0 = self.selected.as_slice().choose(rng).copied();
+        let index1 = self.not_selected.as_slice().choose(rng).copied();
+
+        let Some(index0) = index0 else {
             return self;
-        }
-
-        let c0 = loop {
-            let row = rng.gen_range(0..env.input.map_size);
-            let col = rng.gen_range(0..env.input.map_size);
-            let c = Coord::new(row, col);
-            if self.map[c] {
-                break c;
-            }
+        };
+        let Some(index1) = index1 else {
+            return self;
         };
 
-        let c1 = loop {
-            let row = rng.gen_range(0..env.input.map_size);
-            let col = rng.gen_range(0..env.input.map_size);
-            let c = Coord::new(row, col);
-            if !self.map[c] {
-                break c;
-            }
-        };
+        let row0 = index0 / env.input.map_size;
+        let col0 = index0 % env.input.map_size;
+        let coord0 = Coord::new(row0, col0);
+        let row1 = index1 / env.input.map_size;
+        let col1 = index1 % env.input.map_size;
+        let coord1 = Coord::new(row1, col1);
 
-        self.map[c0] ^= true;
-        self.map[c1] ^= true;
+        self.map[coord0] ^= true;
+        self.map[coord1] ^= true;
+
+        self.selected.remove(index0);
+        self.selected.add(index1);
+        self.not_selected.remove(index1);
+        self.not_selected.add(index0);
+
         self.conditional_entropy = None;
 
         self
@@ -505,16 +530,10 @@ fn annealing(
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let temp0 = 1e-2;
-    let temp1 = 1e-4;
-    let mut inv_temp = 1.0 / temp0;
-
     loop {
         all_iter += 1;
         if (all_iter & ((1 << 4) - 1)) == 0 {
             let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
-            let temp = f64::powf(temp0, 1.0 - time) * f64::powf(temp1, time);
-            inv_temp = 1.0 / temp;
 
             if time >= 1.0 {
                 break;

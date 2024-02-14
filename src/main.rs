@@ -3,6 +3,7 @@ mod distributions;
 mod grid;
 mod problem;
 mod solver;
+mod data_structures;
 
 #[allow(unused_imports)]
 use proconio::*;
