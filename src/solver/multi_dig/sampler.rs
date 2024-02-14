@@ -247,6 +247,43 @@ impl<'a> Env<'a> {
             states.truncate(Self::MAX_STATE_COUNT);
         }
 
+        // 確率計算に支障のない範囲でさらにstateの個数を絞る
+        let max_log_likelihood = states[0].log_likelihood;
+        let mut probs = states
+            .iter()
+            .map(|s| (s.log_likelihood - max_log_likelihood).exp())
+            .collect_vec();
+        let sum_probs = probs.iter().sum::<f64>();
+
+        for p in probs.iter_mut() {
+            *p /= sum_probs;
+        }
+
+        let mut take_count = states.len();
+        let mut prob_sum = 0.0;
+
+        for i in 0..states.len() {
+            prob_sum += probs[i];
+
+            if i >= 1 && prob_sum >= 0.9999 {
+                take_count = i + 1;
+                break;
+            }
+        }
+
+        states.truncate(take_count);
+        probs.truncate(take_count);
+
+        // 確率計算をやり直し
+        let sum_probs = probs.iter().sum::<f64>();
+
+        for p in probs.iter_mut() {
+            *p /= sum_probs;
+        }
+
+        let probs_log2 = probs.iter().map(|&p| p.log2()).collect_vec();
+
+        // マスの選択状況
         let mut state_maps = vec![];
 
         for state in states.iter() {
@@ -261,19 +298,7 @@ impl<'a> Env<'a> {
             state_maps.push(map);
         }
 
-        let max_log_likelihood = states[0].log_likelihood;
-        let mut probs = states
-            .iter()
-            .map(|s| (s.log_likelihood - max_log_likelihood).exp())
-            .collect_vec();
-        let sum_probs = probs.iter().sum::<f64>();
-
-        for p in probs.iter_mut() {
-            *p /= sum_probs;
-        }
-
-        let probs_log2 = probs.iter().map(|&p| p.log2()).collect_vec();
-
+        // 初期エントロピーの計算
         let mut base_entropy = 0.0;
 
         for &prob in probs.iter() {
