@@ -8,7 +8,7 @@ use crate::{
     solver::multi_dig::{mcmc::State, sampler::ProbTable},
 };
 use itertools::Itertools;
-use rand::{seq::SliceRandom, Rng};
+use rand::seq::SliceRandom;
 use rand_core::SeedableRng;
 use rand_distr::{Distribution, WeightedIndex};
 use rand_pcg::Pcg64Mcg;
@@ -42,9 +42,6 @@ impl MultiDigSolver {
 impl Solver for MultiDigSolver {
     fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
-        let all_coords = (0..input.map_size)
-            .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
-            .collect_vec();
         let mut rng = Pcg64Mcg::from_entropy();
         let turn_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
         let since = Instant::now();
@@ -250,7 +247,6 @@ impl<'a> Env<'a> {
 #[derive(Debug, Clone)]
 struct Observation {
     pos: Vec<Coord>,
-    sampled: i32,
     /// k番目の要素はΣv(pi)=kとなる対数尤度を表す
     log_likelihoods: Vec<f64>,
 }
@@ -270,7 +266,6 @@ impl Observation {
 
             return Self {
                 pos,
-                sampled,
                 log_likelihoods,
             };
         }
@@ -297,7 +292,6 @@ impl Observation {
 
         Self {
             pos,
-            sampled,
             log_likelihoods,
         }
     }

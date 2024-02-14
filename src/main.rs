@@ -1,15 +1,15 @@
 mod common;
+mod data_structures;
 mod distributions;
 mod grid;
 mod problem;
 mod solver;
-mod data_structures;
 
 #[allow(unused_imports)]
 use proconio::*;
 #[allow(unused_imports)]
 use rand::prelude::*;
-use solver::{bayesian::BayesianSolver, Solver};
+use solver::Solver;
 
 use crate::problem::Judge;
 

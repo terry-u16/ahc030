@@ -7,6 +7,7 @@ pub struct IndexSet {
     positions: Vec<Option<usize>>,
 }
 
+#[allow(dead_code)]
 impl IndexSet {
     pub fn new(n: usize) -> Self {
         Self {

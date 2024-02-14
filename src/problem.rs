@@ -1,4 +1,4 @@
-use crate::grid::{Coord, CoordDiff, Map2d};
+use crate::grid::{Coord, Map2d};
 use im_rc::HashMap;
 use itertools::Itertools;
 use proconio::{input, source::line::LineSource};
@@ -74,13 +74,6 @@ impl Oils {
             height,
             len,
         }
-    }
-
-    pub fn in_map(&self, input: &Input, shift: CoordDiff) -> bool {
-        0 <= shift.dr
-            && self.height.wrapping_add_signed(shift.dr) <= input.map_size
-            && 0 <= shift.dc
-            && self.width.wrapping_add_signed(shift.dc) <= input.map_size
     }
 }
 

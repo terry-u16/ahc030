@@ -14,6 +14,7 @@ pub struct BayesianSolver {
     judge: Judge,
 }
 
+#[allow(dead_code)]
 impl BayesianSolver {
     pub fn new(judge: Judge) -> Self {
         Self { judge }
@@ -26,7 +27,7 @@ impl Solver for BayesianSolver {
         let vec_len = mean.len();
         let mut rng = Pcg64Mcg::from_entropy();
 
-        for turn in 0..input.map_size * input.map_size * 2 - 1 {
+        for _ in 0..input.map_size * input.map_size * 2 - 1 {
             let mut map = Map2d::new_with(0.0, input.map_size);
 
             for i in 0..vec_len {
