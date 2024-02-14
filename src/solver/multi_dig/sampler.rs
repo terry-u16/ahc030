@@ -386,35 +386,45 @@ impl State {
         self
     }
 
-    /// 相互情報量を計算する
+    /// 条件付きエントロピーを計算する
     fn calc_conditional_entropy(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
         if let Some(entropy) = self.conditional_entropy {
             return entropy;
         };
 
-        let mut p_obs = vec![];
-        let mut p_oil_obs = vec![];
+        let mut counts = Vec::with_capacity(env.input.oil_count);
+
+        for map in env.state_maps.iter() {
+            let mut count = 0;
+
+            for (&v, &b) in map.iter().zip(self.map.iter()) {
+                count += v * b as usize;
+            }
+
+            counts.push(count);
+        }
+
+        // obs_vの最大値を取得する
+        let mut max_obs_v = 0;
+
+        for &count in counts.iter() {
+            let targets = prob_table.targets(&env.input, self.selected_count, count);
+            max_obs_v.change_max(targets.last().unwrap().2);
+        }
+
+        let mut p_obs = vec![f64::MIN_POSITIVE; max_obs_v + 1];
+        let mut p_oil_obs = Vec::with_capacity(env.input.oil_count);
 
         // 確率の表を作成する
-        for (map, (&state_prob, state_prob_log2)) in env
-            .state_maps
+        for (&counts, (&state_prob, state_prob_log2)) in counts
             .iter()
             .zip(env.probs.iter().zip(env.probs_log2.iter()))
         {
-            let mut counts = 0;
+            let targets = prob_table.targets(&env.input, self.selected_count, counts);
+            let last = targets.last().unwrap().2;
+            let mut current_p_oil_obs = Vec::with_capacity(last - targets[0].2 + 1);
 
-            for (&v, &b) in map.iter().zip(self.map.iter()) {
-                counts += v * b as usize;
-            }
-
-            let mut current_p_oil_obs = vec![];
-            for &(prob, prob_log2, target_v) in
-                prob_table.targets(&env.input, self.selected_count, counts)
-            {
-                if p_obs.len() <= target_v {
-                    p_obs.resize(target_v + 1, f64::MIN_POSITIVE);
-                }
-
+            for &(prob, prob_log2, target_v) in targets {
                 // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
                 // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
                 let p = prob * state_prob;
