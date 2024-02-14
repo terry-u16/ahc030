@@ -157,10 +157,10 @@ impl ProbTable {
         };
 
         let p = f(true_cnt);
-        let p_ln = p.ln();
+        let p_log2 = p.log2();
         prob[true_cnt] = p;
-        prob_log[true_cnt] = p_ln;
-        targets.push((p, p_ln, true_cnt));
+        prob_log[true_cnt] = p_log2;
+        targets.push((p, p_log2, true_cnt));
 
         let mut sum_p = p;
 
@@ -176,10 +176,10 @@ impl ProbTable {
         while sum_p < 0.99994 {
             if left_p >= right_p {
                 let l = left.unwrap();
-                let p_ln = left_p.ln();
+                let p_log2 = left_p.log2();
                 prob[l] = left_p;
-                prob_log[l] = p_ln;
-                targets.push((left_p, p_ln, l));
+                prob_log[l] = p_log2;
+                targets.push((left_p, p_log2, l));
                 sum_p += left_p;
 
                 if l == 0 {
@@ -190,10 +190,10 @@ impl ProbTable {
                     left_p = f(l - 1);
                 }
             } else {
-                let p_ln = right_p.ln();
+                let p_log2 = right_p.log2();
                 prob[right] = right_p;
-                prob_log[right] = p_ln;
-                targets.push((right_p, p_ln, right));
+                prob_log[right] = p_log2;
+                targets.push((right_p, p_log2, right));
                 sum_p += right_p;
 
                 right += 1;
@@ -214,6 +214,7 @@ struct Env<'a> {
     states: Vec<mcmc::State>,
     state_maps: Vec<Map2d<usize>>,
     probs: Vec<f64>,
+    probs_log2: Vec<f64>,
     base_entropy: f64,
     max_sample_count: usize,
 }
@@ -262,6 +263,8 @@ impl<'a> Env<'a> {
             *p /= sum_probs;
         }
 
+        let probs_log2 = probs.iter().map(|&p| p.log2()).collect_vec();
+
         let mut base_entropy = 0.0;
 
         for &prob in probs.iter() {
@@ -273,6 +276,7 @@ impl<'a> Env<'a> {
             states,
             state_maps,
             probs,
+            probs_log2,
             base_entropy,
             max_sample_count,
         })
@@ -368,7 +372,11 @@ impl State {
         let mut p_oil_obs = vec![];
 
         // 確率の表を作成する
-        for (map, state_prob) in env.state_maps.iter().zip(env.probs.iter()) {
+        for (map, (&state_prob, state_prob_log2)) in env
+            .state_maps
+            .iter()
+            .zip(env.probs.iter().zip(env.probs_log2.iter()))
+        {
             let mut counts = 0;
 
             for (&v, &b) in map.iter().zip(self.map.iter()) {
@@ -376,8 +384,8 @@ impl State {
             }
 
             let mut current_p_oil_obs = vec![];
-
-            for &(prob, _, target_v) in prob_table.targets(&env.input, self.selected_count, counts)
+            for &(prob, prob_log2, target_v) in
+                prob_table.targets(&env.input, self.selected_count, counts)
             {
                 if p_obs.len() <= target_v {
                     p_obs.resize(target_v + 1, f64::MIN_POSITIVE);
@@ -386,8 +394,9 @@ impl State {
                 // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
                 // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
                 let p = prob * state_prob;
+                let p_log2 = prob_log2 + state_prob_log2;
                 p_obs[target_v] += p;
-                current_p_oil_obs.push((target_v, p));
+                current_p_oil_obs.push((target_v, p, p_log2));
             }
 
             p_oil_obs.push(current_p_oil_obs);
@@ -395,14 +404,22 @@ impl State {
 
         let mut entropy = 0.0;
 
-        for p_oil_obs in p_oil_obs.iter() {
-            for &(v, p) in p_oil_obs.iter() {
-                // p(配置 | v_obs) = p(v_obs, 配置) / p(v_obs)
-                let p_obs = p_obs[v];
-                let p_oil_obs = p / p_obs;
+        for p in p_obs.iter_mut() {
+            if *p == f64::MIN_POSITIVE {
+                *p = f64::MIN;
+            } else {
+                *p = p.log2();
+            }
+        }
 
+        let p_obs_log2 = p_obs;
+
+        for p_oil_obs in p_oil_obs.iter() {
+            for &(v, pp, p_log2) in p_oil_obs.iter() {
                 // dH = -p(v_obs) * p(配置 | v_obs) * log(p(配置 | v_obs))
-                entropy -= p_obs * p_oil_obs * p_oil_obs.log2();
+                //    = -p(配置, v_obs) * log(p(配置, v_obs) / p(v_obs))
+                //    = -p(配置, v_obs) * (log(p(配置, v_obs)) - log(p(v_obs)))
+                entropy -= pp * (p_log2 - p_obs_log2[v]);
             }
         }
 
