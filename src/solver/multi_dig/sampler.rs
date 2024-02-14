@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::{cmp::Reverse, iter::Map};
 
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
@@ -23,6 +23,7 @@ pub(super) fn select_sample_points(
 ) -> Vec<Coord> {
     assert!(max_sample_count > 0);
     assert!(input.map_size * input.map_size >= max_sample_count);
+
     let all_coords = (0..input.map_size)
         .flat_map(|row| (0..input.map_size).map(move |col| Coord::new(row, col)))
         .collect::<Vec<_>>();
@@ -32,10 +33,33 @@ pub(super) fn select_sample_points(
         .copied()
         .collect_vec();
 
+    let mut map = Map2d::new_with(false, input.map_size);
+
+    for (&shift, oil) in mcmc_states[0].shift.iter().zip(input.oils.iter()) {
+        for &p in oil.pos.iter() {
+            map[p + shift] = true;
+        }
+    }
+
     let Ok(env) = Env::new(input, mcmc_states, max_sample_count) else {
         // エントロピーを計算できないのでランダムなものを返す
         return sampled_coords;
     };
+
+    let count = map.iter().filter(|&&b| !b).count();
+    let flip = count >= max_sample_count;
+
+    let mut sampled_coords = vec![];
+
+    for row in 0..input.map_size {
+        for col in 0..input.map_size {
+            let c = Coord::new(row, col);
+
+            if !map[c] ^ flip {
+                sampled_coords.push(c);
+            }
+        }
+    }
 
     let state = State::new(&env, &sampled_coords);
     let state = annealing(&env, state, prob_table, duration, rng);
@@ -486,7 +510,8 @@ fn annealing(
         let score_diff = new_score - current_score;
 
         // 速度が稼げていないので山登りにしている
-        if score_diff >= 0.0 { // || rng.gen_bool(f64::exp(score_diff as f64 * inv_temp)) {
+        if score_diff >= 0.0 {
+            // || rng.gen_bool(f64::exp(score_diff as f64 * inv_temp)) {
             // 解の更新
             current_score = new_score;
             accepted_count += 1;
