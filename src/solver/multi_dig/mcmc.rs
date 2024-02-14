@@ -1,6 +1,6 @@
 use crate::{
     common::ChangeMinMax as _,
-    grid::{Coord, CoordDiff, Map2d},
+    grid::{Coord, CoordDiff, Map2d, ADJACENTS},
     problem::Input,
 };
 use itertools::Itertools as _;
@@ -116,10 +116,63 @@ impl State {
         self.log_likelihood
     }
 
-    fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+    fn neigh1(self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
+        self.break_and_reconstruct(env, rng, &oil_indices)
+    }
 
+    fn neigh2(self, env: &Env, rng: &mut impl Rng) -> Self {
+        let mut candidates = vec![];
+
+        for (&shift, oil) in self.shift.iter().zip(env.input.oils.iter()) {
+            for &p in oil.pos.iter() {
+                candidates.push(p + shift);
+            }
+        }
+
+        let start = candidates.choose(rng).copied().unwrap();
+        let mut seen = Map2d::new_with(false, env.input.map_size);
+        seen[start] = true;
+
+        let mut stack = vec![start];
+
+        while let Some(pos) = stack.pop() {
+            for &adj in ADJACENTS.iter() {
+                let next = pos + adj;
+
+                if next.in_map(env.input.map_size) && !seen[next] {
+                    seen[next] = true;
+                    stack.push(next);
+                }
+            }
+        }
+
+        let mut target = vec![false; env.input.oil_count];
+
+        for (i, oil) in env.input.oils.iter().enumerate() {
+            for &p in oil.pos.iter() {
+                if seen[p] {
+                    target[i] = true;
+                    break;
+                }
+            }
+        }
+
+        let mut oil_indices = (0..env.input.oil_count)
+            .filter(|&i| target[i])
+            .collect_vec();
+
+        oil_indices.shuffle(rng);
+        self.break_and_reconstruct(env, rng, &oil_indices)
+    }
+
+    fn break_and_reconstruct(
+        mut self,
+        env: &Env,
+        rng: &mut impl Rng,
+        oil_indices: &[usize],
+    ) -> Self {
         // 同じ場所への配置を許可しない
         let last_shifts = self.shift.clone();
         let mut taboos = vec![false; env.input.oil_count];
@@ -294,7 +347,11 @@ pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rn
 
         // 変形
         let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
-        let new_state = state.clone().neigh(env, rng, oil_count);
+        let new_state = if rng.gen_bool(0.9) {
+            state.clone().neigh1(env, rng, oil_count)
+        } else {
+            state.clone().neigh2(env, rng)
+        };
 
         // スコア計算
         let log_likelihood_diff = new_state.calc_log_likelihood() - state.calc_log_likelihood();
