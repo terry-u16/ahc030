@@ -1,4 +1,8 @@
-use std::{cmp::Reverse, iter::Map};
+use std::{
+    cmp::Reverse,
+    iter::Map,
+    ops::{Range, RangeInclusive},
+};
 
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
@@ -82,7 +86,7 @@ pub(super) fn select_sample_points(
 pub(super) struct ProbTable {
     prob: Vec<Vec<Vec<f64>>>,
     prob_log: Vec<Vec<Vec<f64>>>,
-    targets: Vec<Vec<Vec<(f64, f64, usize)>>>,
+    targets: Vec<Vec<Range<usize>>>,
 }
 
 impl ProbTable {
@@ -95,7 +99,7 @@ impl ProbTable {
 
         let prob = vec![vec![vec![]; oil_cnt + 1]; sq_cnt + 1];
         let prob_log = vec![vec![vec![]; oil_cnt + 1]; sq_cnt + 1];
-        let targets = vec![vec![vec![]; oil_cnt + 1]; sq_cnt + 1];
+        let targets = vec![vec![Range::default(); oil_cnt + 1]; sq_cnt + 1];
 
         Self {
             prob,
@@ -104,46 +108,35 @@ impl ProbTable {
         }
     }
 
-    fn prob(&mut self, input: &Input, sq_cnt: usize, true_cnt: usize, observe_cnt: usize) -> f64 {
+    fn range(&mut self, input: &Input, sq_cnt: usize, true_cnt: usize) -> Range<usize> {
         assert!(sq_cnt > 0);
 
-        if self.prob[sq_cnt][true_cnt].is_empty() {
+        if self.targets[sq_cnt][true_cnt] == Range::default() {
             self.lazy_init(input, sq_cnt, true_cnt);
         }
 
-        self.prob[sq_cnt][true_cnt]
-            .get(observe_cnt)
-            .copied()
-            .unwrap_or(Self::MIN_PROB)
+        self.targets[sq_cnt][true_cnt].clone()
     }
 
-    fn prob_log(
+    fn probs(
         &mut self,
         input: &Input,
         sq_cnt: usize,
         true_cnt: usize,
-        observe_cnt: usize,
-    ) -> f64 {
+    ) -> (&[f64], &[f64], Range<usize>) {
         assert!(sq_cnt > 0);
 
-        if self.prob_log[sq_cnt][true_cnt].is_empty() {
+        if self.targets[sq_cnt][true_cnt] == Range::default() {
             self.lazy_init(input, sq_cnt, true_cnt);
         }
 
-        self.prob_log[sq_cnt][true_cnt]
-            .get(observe_cnt)
-            .copied()
-            .unwrap_or(Self::MIN_PROB_LN)
-    }
+        let range = self.targets[sq_cnt][true_cnt].clone();
 
-    fn targets(&mut self, input: &Input, sq_cnt: usize, true_cnt: usize) -> &[(f64, f64, usize)] {
-        assert!(sq_cnt > 0);
-
-        if self.targets[sq_cnt][true_cnt].is_empty() {
-            self.lazy_init(input, sq_cnt, true_cnt);
-        }
-
-        &self.targets[sq_cnt][true_cnt]
+        (
+            &self.prob[sq_cnt][true_cnt][range.clone()],
+            &self.prob_log[sq_cnt][true_cnt][range.clone()],
+            range,
+        )
     }
 
     fn lazy_init(&mut self, input: &Input, sq_cnt: usize, true_cnt: usize) {
@@ -151,16 +144,14 @@ impl ProbTable {
 
         let mut prob = vec![Self::MIN_PROB; input.map_size * input.map_size];
         let mut prob_log = vec![Self::MIN_PROB_LN; input.map_size * input.map_size];
-        let mut targets = vec![];
 
         if sq_cnt == 1 {
             prob[true_cnt] = 1.0;
             prob_log[true_cnt] = 0.0;
-            targets.push((1.0, 0.0, true_cnt));
 
             self.prob[sq_cnt][true_cnt] = prob;
             self.prob_log[sq_cnt][true_cnt] = prob_log;
-            self.targets[sq_cnt][true_cnt] = targets;
+            self.targets[sq_cnt][true_cnt] = true_cnt..true_cnt + 1;
             return;
         }
 
@@ -184,9 +175,10 @@ impl ProbTable {
         let p_log2 = p.log2();
         prob[true_cnt] = p;
         prob_log[true_cnt] = p_log2;
-        targets.push((p, p_log2, true_cnt));
 
         let mut sum_p = p;
+        let mut l_seen = true_cnt;
+        let mut r_seen = true_cnt;
 
         let (mut left, mut left_p) = if true_cnt == 0 {
             (None, 0.0)
@@ -200,10 +192,10 @@ impl ProbTable {
         while sum_p < 0.99994 {
             if left_p >= right_p {
                 let l = left.unwrap();
+                l_seen = l;
                 let p_log2 = left_p.log2();
                 prob[l] = left_p;
                 prob_log[l] = p_log2;
-                targets.push((left_p, p_log2, l));
                 sum_p += left_p;
 
                 if l == 0 {
@@ -214,10 +206,10 @@ impl ProbTable {
                     left_p = f(l - 1);
                 }
             } else {
+                r_seen = right;
                 let p_log2 = right_p.log2();
                 prob[right] = right_p;
                 prob_log[right] = p_log2;
-                targets.push((right_p, p_log2, right));
                 sum_p += right_p;
 
                 right += 1;
@@ -225,11 +217,9 @@ impl ProbTable {
             }
         }
 
-        targets.sort_unstable_by_key(|&(_, _, i)| i);
-
         self.prob[sq_cnt][true_cnt] = prob;
         self.prob_log[sq_cnt][true_cnt] = prob_log;
-        self.targets[sq_cnt][true_cnt] = targets;
+        self.targets[sq_cnt][true_cnt] = l_seen..r_seen + 1;
     }
 }
 
@@ -314,6 +304,11 @@ struct State {
     conditional_entropy: Option<f64>,
 }
 
+static mut OVERLAP_COUNTS: Vec<usize> = vec![];
+static mut P_OBS: Vec<f64> = vec![];
+static mut P_OIL_OBS: Vec<Vec<(f64, f64)>> = vec![];
+static mut P_OIL_OBS_RANGES: Vec<Range<usize>> = vec![];
+
 impl State {
     fn new(env: &Env, selected_coords: &[Coord]) -> Self {
         let mut map = Map2d::new_with(false, env.input.map_size);
@@ -337,8 +332,6 @@ impl State {
             let col = rng.gen_range(0..env.input.map_size);
             let c = Coord::new(row, col);
 
-            let n2 = env.input.map_size * env.input.map_size;
-
             if (self.selected_count <= 1 && self.map[c])
                 || (self.selected_count >= env.max_sample_count && !self.map[c])
             {
@@ -361,6 +354,10 @@ impl State {
     }
 
     fn neigh_flip_double(mut self, env: &Env, rng: &mut impl Rng) -> Self {
+        if self.selected_count <= 1 || self.selected_count >= env.max_sample_count {
+            return self;
+        }
+
         let c0 = loop {
             let row = rng.gen_range(0..env.input.map_size);
             let col = rng.gen_range(0..env.input.map_size);
@@ -388,77 +385,93 @@ impl State {
 
     /// 条件付きエントロピーを計算する
     fn calc_conditional_entropy(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
-        if let Some(entropy) = self.conditional_entropy {
-            return entropy;
-        };
+        unsafe {
+            if let Some(entropy) = self.conditional_entropy {
+                return entropy;
+            };
 
-        let mut counts = Vec::with_capacity(env.input.oil_count);
+            P_OBS.resize(10000, f64::MIN_POSITIVE);
+            P_OIL_OBS.resize(env.states.len(), vec![]);
+            let counts = &mut OVERLAP_COUNTS;
+            counts.clear();
 
-        for map in env.state_maps.iter() {
-            let mut count = 0;
+            for map in env.state_maps.iter() {
+                let mut count = 0;
 
-            for (&v, &b) in map.iter().zip(self.map.iter()) {
-                count += v * b as usize;
+                for (&v, &b) in map.iter().zip(self.map.iter()) {
+                    count += v * b as usize;
+                }
+
+                counts.push(count);
             }
 
-            counts.push(count);
-        }
+            // obs_vの最大値を取得する
+            let mut max_obs_v = 0;
 
-        // obs_vの最大値を取得する
-        let mut max_obs_v = 0;
-
-        for &count in counts.iter() {
-            let targets = prob_table.targets(&env.input, self.selected_count, count);
-            max_obs_v.change_max(targets.last().unwrap().2);
-        }
-
-        let mut p_obs = vec![f64::MIN_POSITIVE; max_obs_v + 1];
-        let mut p_oil_obs = Vec::with_capacity(env.input.oil_count);
-
-        // 確率の表を作成する
-        for (&counts, (&state_prob, state_prob_log2)) in counts
-            .iter()
-            .zip(env.probs.iter().zip(env.probs_log2.iter()))
-        {
-            let targets = prob_table.targets(&env.input, self.selected_count, counts);
-            let last = targets.last().unwrap().2;
-            let mut current_p_oil_obs = Vec::with_capacity(last - targets[0].2 + 1);
-
-            for &(prob, prob_log2, target_v) in targets {
-                // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
-                // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
-                let p = prob * state_prob;
-                let p_log2 = prob_log2 + state_prob_log2;
-                p_obs[target_v] += p;
-                current_p_oil_obs.push((target_v, p, p_log2));
+            for &count in counts.iter() {
+                let range = prob_table.range(&env.input, self.selected_count, count);
+                max_obs_v.change_max(range.end);
             }
 
-            p_oil_obs.push(current_p_oil_obs);
-        }
+            let p_obs = &mut P_OBS[0..max_obs_v];
+            p_obs.fill(f64::MIN_POSITIVE);
+            let p_oil_obs = &mut P_OIL_OBS;
+            let p_oil_obs_ranges = &mut P_OIL_OBS_RANGES;
+            p_oil_obs_ranges.clear();
 
-        let mut entropy = 0.0;
+            // 確率の表を作成する
+            for ((&counts, (&state_prob, state_prob_log2)), p_oil_obs) in counts
+                .iter()
+                .zip(env.probs.iter().zip(env.probs_log2.iter()))
+                .zip(p_oil_obs.iter_mut())
+            {
+                let (prob, prob_log2, range) =
+                    prob_table.probs(&env.input, self.selected_count, counts);
 
-        for p in p_obs.iter_mut() {
-            if *p == f64::MIN_POSITIVE {
-                *p = f64::MIN;
-            } else {
-                *p = p.log2();
+                p_oil_obs.resize(range.end - range.start, (0.0, 0.0));
+                p_oil_obs_ranges.push(range.clone());
+                let p_obs = &mut p_obs[range];
+
+                for ((p_obs, p_oil_obs), (&prob, &prob_log2)) in p_obs
+                    .iter_mut()
+                    .zip(p_oil_obs.iter_mut())
+                    .zip(prob.iter().zip(prob_log2.iter()))
+                {
+                    // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
+                    // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
+                    let p = prob * state_prob;
+                    let p_log2 = prob_log2 + state_prob_log2;
+                    *p_obs += p;
+                    *p_oil_obs = (p, p_log2);
+                }
             }
-        }
 
-        let p_obs_log2 = p_obs;
+            let mut entropy = 0.0;
 
-        for p_oil_obs in p_oil_obs.iter() {
-            for &(v, pp, p_log2) in p_oil_obs.iter() {
-                // dH = -p(v_obs) * p(配置 | v_obs) * log(p(配置 | v_obs))
-                //    = -p(配置, v_obs) * log(p(配置, v_obs) / p(v_obs))
-                //    = -p(配置, v_obs) * (log(p(配置, v_obs)) - log(p(v_obs)))
-                entropy -= pp * (p_log2 - p_obs_log2[v]);
+            for p in p_obs.iter_mut() {
+                if *p == f64::MIN_POSITIVE {
+                    *p = f64::MIN;
+                } else {
+                    *p = p.log2();
+                }
             }
-        }
 
-        self.conditional_entropy = Some(entropy);
-        entropy
+            let p_obs_log2 = p_obs;
+
+            for (p_oil_obs, range) in p_oil_obs.iter().zip(p_oil_obs_ranges.iter()) {
+                let p_obs_log2 = &p_obs_log2[range.clone()];
+
+                for (&(pp, p_log2), &p_obs_log2) in p_oil_obs.iter().zip(p_obs_log2.iter()) {
+                    // dH = -p(v_obs) * p(配置 | v_obs) * log(p(配置 | v_obs))
+                    //    = -p(配置, v_obs) * log(p(配置, v_obs) / p(v_obs))
+                    //    = -p(配置, v_obs) * (log(p(配置, v_obs)) - log(p(v_obs)))
+                    entropy -= pp * (p_log2 - p_obs_log2);
+                }
+            }
+
+            self.conditional_entropy = Some(entropy);
+            entropy
+        }
     }
 
     /// スコア（= 相互情報量 / 調査コスト）を計算する
