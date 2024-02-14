@@ -1,16 +1,14 @@
-mod mcmc;
+mod generator;
 mod sampler;
 
 use crate::{
     distributions::GaussianDistribution,
     grid::{Coord, CoordDiff, Map2d},
     problem::{Input, Judge},
-    solver::multi_dig::{mcmc::State, sampler::ProbTable},
+    solver::multi_dig::{generator::State, sampler::ProbTable},
 };
-use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand_core::SeedableRng;
-use rand_distr::{Distribution, WeightedIndex};
 use rand_pcg::Pcg64Mcg;
 use std::time::Instant;
 use std::vec;
@@ -67,21 +65,8 @@ impl Solver for MultiDigSolver {
                 return;
             }
 
-            // 尤度の比に応じてMCMCの初期状態をサンプリング
-            let max_log_likelihood = states
-                .iter()
-                .map(|s| s.log_likelihood)
-                .fold(f64::MIN, f64::max);
-            let weights = states
-                .iter()
-                .map(|s| (s.log_likelihood - max_log_likelihood).exp())
-                .collect_vec();
-            let dist = WeightedIndex::new(weights).unwrap();
-            let state_i = dist.sample(&mut rng);
-            let state = states[state_i].clone();
-
-            let mut sampled_states = mcmc::mcmc(&env, state, turn_duration * 0.7, &mut rng);
-            states.append(&mut sampled_states);
+            // 新たな置き方を生成
+            states = generator::generate_states(&env, states, turn_duration * 0.7, &mut rng);
             states.sort_unstable();
             states.dedup();
             states.shuffle(&mut rng);

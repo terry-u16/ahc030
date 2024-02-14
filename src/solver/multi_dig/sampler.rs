@@ -10,12 +10,12 @@ use ordered_float::OrderedFloat;
 use rand::{seq::SliceRandom as _, Rng};
 use std::{cmp::Reverse, ops::Range};
 
-use super::mcmc::{self};
+use super::generator::{self};
 
 pub(super) fn select_sample_points(
     input: &Input,
     prob_table: &mut ProbTable,
-    mcmc_states: Vec<mcmc::State>,
+    mcmc_states: Vec<generator::State>,
     max_sample_count: usize,
     duration: f64,
     rng: &mut impl Rng,
@@ -220,7 +220,7 @@ impl ProbTable {
 
 struct Env<'a> {
     input: &'a Input,
-    states: Vec<mcmc::State>,
+    states: Vec<generator::State>,
     state_maps: Vec<Map2d<usize>>,
     probs: Vec<f64>,
     probs_log2: Vec<f64>,
@@ -233,7 +233,7 @@ impl<'a> Env<'a> {
 
     fn new(
         input: &'a Input,
-        mut states: Vec<mcmc::State>,
+        mut states: Vec<generator::State>,
         max_sample_count: usize,
     ) -> Result<Self, ()> {
         if states.len() <= 1 {

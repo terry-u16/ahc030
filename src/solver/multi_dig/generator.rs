@@ -4,12 +4,13 @@ use crate::{
     problem::Input,
 };
 use itertools::Itertools as _;
+use ordered_float::OrderedFloat;
 use rand::{
     seq::{IteratorRandom as _, SliceRandom as _},
     Rng,
 };
 use rand_distr::{Distribution as _, WeightedAliasIndex, WeightedIndex};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::hash::Hash;
 
 use super::Env;
@@ -110,10 +111,6 @@ impl State {
         self.log_likelihood += observation.log_likelihoods[count];
 
         self.counts.push(count);
-    }
-
-    fn calc_log_likelihood(&self) -> f64 {
-        self.log_likelihood
     }
 
     fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
@@ -271,8 +268,33 @@ impl Ord for State {
     }
 }
 
-pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<State> {
-    let mut sampled_states = vec![state.clone()];
+pub(super) fn generate_states(
+    env: &Env,
+    mut states: Vec<State>,
+    duration: f64,
+    rng: &mut impl Rng,
+) -> Vec<State> {
+    let mut hashes = FxHashSet::default();
+
+    for state in states.iter() {
+        hashes.insert(state.hash);
+    }
+
+    let base_log_likelihood = states
+        .iter()
+        .map(|s| s.log_likelihood)
+        .fold(f64::MIN, f64::max);
+
+    let mut prefix_prob = vec![OrderedFloat(
+        (states[0].log_likelihood - base_log_likelihood).exp(),
+    )];
+
+    for i in 1..states.len() {
+        let p = OrderedFloat(
+            (states[i].log_likelihood - base_log_likelihood).exp() + prefix_prob[i - 1].0,
+        );
+        prefix_prob.push(p);
+    }
 
     let mut all_iter = 0;
     let mut valid_iter = 0;
@@ -281,7 +303,7 @@ pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rn
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![0, 10, 60, 10]).unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![0, 0, 60, 10]).unwrap();
 
     loop {
         let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
@@ -293,17 +315,23 @@ pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rn
         all_iter += 1;
 
         // 変形
+        let x = rng.gen_range(0.0..prefix_prob.last().unwrap().0);
+        let index = prefix_prob
+            .binary_search(&OrderedFloat(x))
+            .unwrap_or_else(|x| x);
+        let state = states[index].clone();
         let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
-        let new_state = state.clone().neigh(env, rng, oil_count);
+        let new_state = state.neigh(env, rng, oil_count);
 
-        // スコア計算
-        let log_likelihood_diff = new_state.calc_log_likelihood() - state.calc_log_likelihood();
+        if hashes.insert(new_state.hash) {
+            // 凄く大きな値を引いてしまうとオーバーフローする可能性があるため注意
+            // 適切にサンプリングできればよいので、重みは適当に上限を設ける
+            let mut p = (new_state.log_likelihood - base_log_likelihood).exp()
+                + prefix_prob.last().unwrap().0;
+            p.change_min(10.0);
+            prefix_prob.push(OrderedFloat(p));
+            states.push(new_state);
 
-        if log_likelihood_diff >= 0.0 || rng.gen_bool(f64::exp(log_likelihood_diff)) {
-            // サンプリングされた解を保存
-            // 解の集合が分かれば良いので、遷移しなかったときは不要
-            state = new_state;
-            sampled_states.push(state.clone());
             accepted_count += 1;
         }
 
@@ -315,5 +343,5 @@ pub(super) fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rn
         all_iter, valid_iter, accepted_count
     );
 
-    sampled_states
+    states
 }
