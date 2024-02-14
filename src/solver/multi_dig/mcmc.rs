@@ -120,6 +120,16 @@ impl State {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
 
+        // 同じ場所への配置を許可しない
+        let last_shifts = self.shift.clone();
+        let mut taboos = vec![false; env.input.oil_count];
+        let taboo = oil_indices.choose(rng).copied().unwrap();
+        if env.input.oils[taboo].height < env.input.map_size
+            || env.input.oils[taboo].width < env.input.map_size
+        {
+            taboos[taboo] = true;
+        }
+
         for &oil_i in oil_indices.iter() {
             let oil = &env.input.oils[oil_i];
             self.remove_oil(env, oil_i);
@@ -148,6 +158,12 @@ impl State {
             for row in 0..height {
                 for col in 0..width {
                     let shift = CoordDiff::new(row as isize, col as isize);
+
+                    // 同じ場所への配置を許可しない
+                    if taboos[oil_i] && shift == last_shifts[oil_i] {
+                        continue;
+                    }
+
                     let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
                     shifts.push(shift);
                     log_likelihoods.push(log_likelihood);
