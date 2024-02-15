@@ -43,7 +43,12 @@ impl Solver for MultiDigSolver {
     fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
-        let turn_duration = 2.0 / ((input.map_size as f64).powi(2) * 2.0);
+        let all_time_mul = if input.oil_count <= 8 && input.eps <= 0.15 {
+            2.0
+        } else {
+            1.0
+        };
+        let turn_duration = all_time_mul * 2.0 / ((input.map_size as f64).powi(2) * 2.0);
         let since = Instant::now();
         let mut states = vec![State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
@@ -55,7 +60,7 @@ impl Solver for MultiDigSolver {
 
         for turn in 0..input.map_size * input.map_size * 2 {
             // TLE緊急回避モード
-            if input.duration_corrector.elapsed(since).as_secs_f64() >= 2.8 {
+            if input.duration_corrector.elapsed(since).as_secs_f64() >= 2.95 {
                 if self.answer_all(&states, input).is_ok() {
                     return;
                 }
@@ -122,10 +127,8 @@ impl Solver for MultiDigSolver {
             };
             let max_sample_count = if turn < input.map_size * input.map_size {
                 input.map_size * input.map_size
-            } else if turn < input.map_size * input.map_size * 3 / 2 {
-                input.map_size * input.map_size / 8
             } else {
-                input.map_size * input.map_size / 32
+                input.map_size * input.map_size / 8
             };
 
             let targets = sampler::select_sample_points(
