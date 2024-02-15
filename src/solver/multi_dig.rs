@@ -67,6 +67,13 @@ impl Solver for MultiDigSolver {
                 return;
             }
 
+            eprint!("turn {}: ", turn);
+
+            for cands in &env.obs.shift_candidates {
+                eprint!("{} ", cands.len());
+            }
+            eprintln!();
+
             // 新たな置き方を生成
             states = generator::generate_states(&env, states, turn_duration * 0.7, &mut rng);
             states.sort_unstable();
