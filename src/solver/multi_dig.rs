@@ -2,16 +2,18 @@ mod generator;
 mod sampler;
 
 use crate::{
-    distributions::GaussianDistribution,
+    distributions::{GaussianBayesianEstimator, GaussianDistribution},
     grid::{Coord, CoordDiff, Map2d},
     problem::{Input, Judge},
     solver::multi_dig::{generator::State, sampler::ProbTable},
 };
+use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use rand::seq::SliceRandom;
 use rand_core::SeedableRng;
 use rand_pcg::Pcg64Mcg;
-use std::time::Instant;
 use std::vec;
+use std::{cmp::Reverse, time::Instant};
 
 use super::Solver;
 
@@ -64,6 +66,11 @@ impl Solver for MultiDigSolver {
 
                 return;
             }
+
+            eprintln!(
+                "candidates: {}",
+                env.shift_candidates.iter().map(|v| v.len()).join(" ")
+            );
 
             // 新たな置き方を生成
             states = generator::generate_states(&env, states, turn_duration * 0.7, &mut rng);
@@ -163,6 +170,9 @@ struct Env<'a> {
     inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
     /// matrix[obs_i][oil_i][shift] := oil_iをshiftだけ動かした領域とobs_iの重なりの数
     overlaps: Vec<Vec<Map2d<usize>>>,
+    /// matrix[oil_i] := oil_iの移動先の候補リスト
+    shift_candidates: Vec<Vec<CoordDiff>>,
+    bayesian_estimator: GaussianBayesianEstimator,
 }
 
 impl<'a> Env<'a> {
@@ -174,16 +184,38 @@ impl<'a> Env<'a> {
         let inv_relative_observation_indices = vec![];
         let overlaps = vec![];
 
+        let shift_candidates = input
+            .oils
+            .iter()
+            .map(|oil| {
+                let mut candidates = vec![];
+
+                for dr in 0..=input.map_size - oil.height {
+                    for dc in 0..=input.map_size - oil.width {
+                        candidates.push(CoordDiff::new(dr as isize, dc as isize));
+                    }
+                }
+
+                candidates
+            })
+            .collect_vec();
+
+        let bayesian_estimator = GaussianBayesianEstimator::new(input);
+
         Self {
             input,
             observations,
             relative_observation_indices,
             inv_relative_observation_indices,
             overlaps,
+            shift_candidates,
+            bayesian_estimator,
         }
     }
 
     fn add_observation(&mut self, input: &Input, observation: Observation) {
+        self.update_shift_candidates(&observation);
+
         let obs_id = self.observations.len();
         let mut observed_map = Map2d::new_with(false, input.map_size);
 
@@ -228,11 +260,89 @@ impl<'a> Env<'a> {
         self.observations.push(observation);
         self.overlaps.push(overlaps);
     }
+
+    fn update_shift_candidates(&mut self, observation: &Observation) {
+        //if self.shift_candidates[0].len()
+        //    != (self.input.map_size - self.input.oils[0].height + 1)
+        //        * (self.input.map_size - self.input.oils[0].width + 1)
+        //{
+        //    return;
+        //}
+
+        let sampled = observation.sampled;
+        self.bayesian_estimator
+            .update(&self.input, &observation.pos, sampled);
+
+        let mut shift_candidates = vec![];
+
+        for oil in self.input.oils.iter() {
+            let size =
+                (self.input.map_size - oil.height + 1) * (self.input.map_size - oil.width + 1);
+            let mut candidates = Vec::with_capacity(size);
+            let mut log_likelihoods = Vec::with_capacity(size);
+
+            for dr in 0..=self.input.map_size - oil.height {
+                for dc in 0..=self.input.map_size - oil.width {
+                    let shift = CoordDiff::new(dr as isize, dc as isize);
+                    let mut log_likelihood = 0.0;
+
+                    for &p in oil.pos.iter() {
+                        let p = p + shift;
+                        let dist = self
+                            .bayesian_estimator
+                            .get_marginal_distribution(&self.input, p);
+
+                        // 真の値が0でない確率を求める
+                        let p = 1.0 - dist.calc_cumulative_dist(0.5);
+                        log_likelihood += p.max(f64::MIN_POSITIVE).ln();
+                    }
+
+                    candidates.push(shift);
+                    log_likelihoods.push(log_likelihood);
+                }
+            }
+
+            let max_log_likelihoods = log_likelihoods
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            let mut probs = log_likelihoods
+                .iter()
+                .map(|&v| (v - max_log_likelihoods).exp())
+                .collect_vec();
+            let prob_sum = probs.iter().sum::<f64>();
+
+            for p in probs.iter_mut() {
+                *p /= prob_sum;
+            }
+
+            let mut indices = (0..size).collect_vec();
+            indices.sort_unstable_by_key(|&i| Reverse(OrderedFloat(probs[i])));
+
+            let mut cum_sum = 0.0;
+            let mut result = vec![];
+
+            for (i, &index) in indices.iter().enumerate() {
+                result.push(candidates[index]);
+                cum_sum += probs[index];
+
+                // 99.999%を超えたら打ち切る
+                if i >= 10 && cum_sum >= 0.99999 {
+                    break;
+                }
+            }
+
+            shift_candidates.push(result);
+        }
+
+        self.shift_candidates = shift_candidates;
+    }
 }
 
 #[derive(Debug, Clone)]
 struct Observation {
     pos: Vec<Coord>,
+    sampled: i32,
     /// k番目の要素はΣv(pi)=kとなる対数尤度を表す
     log_likelihoods: Vec<f64>,
 }
@@ -252,6 +362,7 @@ impl Observation {
 
             return Self {
                 pos,
+                sampled,
                 log_likelihoods,
             };
         }
@@ -278,6 +389,7 @@ impl Observation {
 
         Self {
             pos,
+            sampled,
             log_likelihoods,
         }
     }
