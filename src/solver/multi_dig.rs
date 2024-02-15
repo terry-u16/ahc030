@@ -111,7 +111,9 @@ impl Solver for MultiDigSolver {
                 }
             }
 
-            let time_mul = if turn < 20 {
+            let time_mul = if turn < 10 {
+                20.0
+            } else if turn < 20 {
                 5.0
             } else if turn < 50 {
                 2.0

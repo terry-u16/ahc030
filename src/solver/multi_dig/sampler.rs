@@ -232,7 +232,7 @@ struct Env<'a> {
 }
 
 impl<'a> Env<'a> {
-    const MAX_STATE_COUNT: usize = 20;
+    const MAX_STATE_COUNT: usize = 50;
 
     fn new(
         input: &'a Input,
