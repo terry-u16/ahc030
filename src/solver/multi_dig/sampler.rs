@@ -448,9 +448,9 @@ impl State {
         };
 
         if !STATIC_INIT {
-            P_OBS.resize(10000, f64::MIN_POSITIVE);
-            P_OIL_OBS.resize(env.states.len(), vec![0.0; 10000]);
-            P_LOG2_OIL_OBS.resize(env.states.len(), vec![0.0; 10000]);
+            P_OBS.resize(1000, f64::MIN_POSITIVE);
+            P_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
+            P_LOG2_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
             STATIC_INIT = true;
         }
 
@@ -498,17 +498,13 @@ impl State {
             p_oil_obs_ranges.push(range.clone());
             let p_obs = &mut p_obs[range];
 
-            for (p_obs, &prob) in p_obs.iter_mut().zip(prob.iter()) {
+            for ((p_obs, p_oil_obs), &prob) in
+                p_obs.iter_mut().zip(p_oil_obs.iter_mut()).zip(prob.iter())
+            {
                 // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
                 // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
                 let p = prob * state_prob;
                 *p_obs += p;
-            }
-
-            for (p_oil_obs, &prob) in p_oil_obs.iter_mut().zip(prob.iter()) {
-                // p_oil_obsにセット
-                // コンパイラくん頑張ってくれの気持ちで処理を分けている
-                let p = prob * state_prob;
                 *p_oil_obs = p;
             }
 
