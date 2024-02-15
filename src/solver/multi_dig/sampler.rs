@@ -593,14 +593,14 @@ fn annealing(
         valid_iter += 1;
     }
 
-    //eprintln!("===== annealing =====");
-    //eprintln!("init score : {}", init_score);
-    //eprintln!("score      : {}", best_score);
-    //eprintln!("all iter   : {}", all_iter);
-    //eprintln!("valid iter : {}", valid_iter);
-    //eprintln!("accepted   : {}", accepted_count);
-    //eprintln!("updated    : {}", update_count);
-    //eprintln!("");
+    eprintln!("===== annealing =====");
+    eprintln!("init score : {}", init_score);
+    eprintln!("score      : {}", best_score);
+    eprintln!("all iter   : {}", all_iter);
+    eprintln!("valid iter : {}", valid_iter);
+    eprintln!("accepted   : {}", accepted_count);
+    eprintln!("updated    : {}", update_count);
+    eprintln!("");
 
     best_solution
 }

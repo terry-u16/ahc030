@@ -1,10 +1,4 @@
-use std::{cmp::Reverse, ops::Range};
-
-use itertools::Itertools;
-use ordered_float::OrderedFloat;
-
 use crate::{
-    common::ChangeMinMax,
     distributions::GaussianDistribution,
     grid::{Coord, CoordDiff, Map2d},
     problem::Input,
@@ -19,11 +13,6 @@ pub(super) struct ObservationManager {
     pub inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
     /// matrix[obs_i][oil_i][shift] := oil_iをshiftだけ動かした領域とobs_iの重なりの数
     pub overlaps: Vec<Vec<Map2d<usize>>>,
-    pub shift_candidates: Vec<Vec<CoordDiff>>,
-    /// matrix[oil_i][shift] := oil_iをshiftだけ動かすときの対数尤度
-    shift_log_likelihoods: Vec<Map2d<f64>>,
-    /// matrix[obs_i][oil_i] := oil_i以外の油田とobs_iとの重なりの最小値と最大値
-    overlap_min_max: Vec<Vec<(usize, usize)>>,
 }
 
 impl ObservationManager {
@@ -35,41 +24,16 @@ impl ObservationManager {
         let inv_relative_observation_indices = vec![];
         let overlaps = vec![];
 
-        let shift_candidates = input
-            .oils
-            .iter()
-            .map(|oil| {
-                let mut candidates = vec![];
-                for row in 0..=input.map_size - oil.height {
-                    for col in 0..=input.map_size - oil.width {
-                        candidates.push(CoordDiff::new(row as isize, col as isize));
-                    }
-                }
-
-                candidates
-            })
-            .collect_vec();
-
-        let shift_log_likelihoods = (0..input.oil_count)
-            .map(|_| Map2d::new_with(0.0, input.map_size))
-            .collect_vec();
-        let overlap_min_max = vec![];
-
         Self {
             observations,
             relative_observation_indices,
             inv_relative_observation_indices,
             overlaps,
-            shift_candidates,
-            shift_log_likelihoods,
-            overlap_min_max,
         }
     }
 
     pub(super) fn add_observation(&mut self, input: &Input, observation: Observation) {
         let obs_id = self.observations.len();
-
-        // 観測による条件式の更新
         let mut observed_map = Map2d::new_with(false, input.map_size);
 
         for &p in observation.pos.iter() {
@@ -78,13 +42,9 @@ impl ObservationManager {
 
         let mut inv_relative_observation_indices = vec![];
         let mut overlaps = vec![];
-        let mut overlap_mins = vec![];
-        let mut overlap_maxs = vec![];
 
         for (oil_i, oil) in input.oils.iter().enumerate() {
             let mut overlap = Map2d::new_with(0, input.map_size);
-            let mut overlap_min = usize::MAX;
-            let mut overlap_max = usize::MIN;
 
             for row in 0..=input.map_size - oil.height {
                 for col in 0..=input.map_size - oil.width {
@@ -101,8 +61,6 @@ impl ObservationManager {
                     }
 
                     overlap[c] = count;
-                    overlap_min.change_min(count);
-                    overlap_max.change_max(count);
 
                     if count > 0 {
                         self.relative_observation_indices[oil_i][c].push((obs_id, count));
@@ -112,81 +70,12 @@ impl ObservationManager {
             }
 
             overlaps.push(overlap);
-            overlap_mins.push(overlap_min);
-            overlap_maxs.push(overlap_max);
         }
-
-        self.overlaps.push(overlaps);
-
-        let overlap_min_sum = overlap_mins.iter().sum::<usize>();
-        let overlap_max_sum = overlap_maxs.iter().sum::<usize>();
-        let overlap_min_max = (0..input.oil_count)
-            .map(|i| {
-                let min = overlap_min_sum - overlap_mins[i];
-                let max = overlap_max_sum - overlap_maxs[i];
-                (min, max)
-            })
-            .collect_vec();
-        self.overlap_min_max.push(overlap_min_max);
 
         self.inv_relative_observation_indices
             .push(inv_relative_observation_indices);
         self.observations.push(observation);
-
-        // 候補をアップデート
-        let mut shift_candidates = vec![];
-
-        for (oil_i, oil) in input.oils.iter().enumerate() {
-            let mut all_shifts = vec![];
-            let mut log_likelihoods = vec![];
-            let (other_min, other_max) = self.overlap_min_max[obs_id][oil_i];
-
-            for row in 0..=input.map_size - oil.height {
-                for col in 0..=input.map_size - oil.width {
-                    let c = Coord::new(row, col);
-                    let shift = CoordDiff::new(row as isize, col as isize);
-                    let overlap = self.overlaps[obs_id][oil_i][c];
-
-                    let min = overlap + other_min;
-                    let max = overlap + other_max;
-                    let likelihood = self.observations[obs_id].sum_likelihood(min..max + 1);
-                    self.shift_log_likelihoods[oil_i][c] += likelihood.ln();
-
-                    all_shifts.push(shift);
-                    log_likelihoods.push(self.shift_log_likelihoods[oil_i][c]);
-                }
-            }
-
-            let max_log_likelihood = log_likelihoods.iter().copied().fold(f64::MIN, f64::max);
-            let mut likelihoods = log_likelihoods
-                .iter()
-                .map(|&v| (v - max_log_likelihood).exp())
-                .collect_vec();
-            let likelihood_sum = likelihoods.iter().sum::<f64>();
-
-            for l in likelihoods.iter_mut() {
-                *l /= likelihood_sum
-            }
-
-            let mut indices = (0..all_shifts.len()).collect_vec();
-            indices.sort_unstable_by_key(|&i| Reverse(OrderedFloat(likelihoods[i])));
-
-            let mut result = vec![];
-            let mut sum = 0.0;
-
-            for i in indices {
-                sum += likelihoods[i];
-                result.push(all_shifts[i]);
-
-                if sum >= 0.9999 {
-                    break;
-                }
-            }
-
-            shift_candidates.push(result);
-        }
-
-        self.shift_candidates = shift_candidates;
+        self.overlaps.push(overlaps);
     }
 }
 
@@ -195,7 +84,6 @@ pub(super) struct Observation {
     pub pos: Vec<Coord>,
     /// k番目の要素はΣv(pi)=kとなる対数尤度を表す
     pub log_likelihoods: Vec<f64>,
-    likelihood_prefix_sum: Vec<f64>,
 }
 
 impl Observation {
@@ -207,48 +95,39 @@ impl Observation {
         let x = sampled as f64;
 
         // k = 1のときは特別扱い
-        let log_likelihoods = if pos.len() == 1 {
+        if pos.len() == 1 {
             let mut log_likelihoods = vec![f64::MIN_POSITIVE.ln(); likelihoods_len];
             log_likelihoods[sampled as usize] = 0.0;
-            log_likelihoods
-        } else {
-            let mut log_likelihoods = Vec::with_capacity(likelihoods_len);
 
-            for true_v in 0..likelihoods_len {
-                let v = true_v as f64;
-                let mean = (k - v) * input.eps + v * (1.0 - input.eps);
-                let variance = k * input.eps * (1.0 - input.eps);
-                let std_dev = variance.sqrt();
-                let gauss = GaussianDistribution::new(mean, std_dev);
+            return Self {
+                pos,
+                log_likelihoods,
+            };
+        }
 
-                let likelihood = if sampled == 0 {
-                    gauss.calc_cumulative_dist(x + 0.5)
-                } else {
-                    gauss.calc_cumulative_dist(x + 0.5) - gauss.calc_cumulative_dist(x - 0.5)
-                }
-                .max(f64::MIN_POSITIVE);
-                let log_likelihood = likelihood.ln();
+        let mut log_likelihoods = Vec::with_capacity(likelihoods_len);
 
-                log_likelihoods.push(log_likelihood);
+        for true_v in 0..likelihoods_len {
+            let v = true_v as f64;
+            let mean = (k - v) * input.eps + v * (1.0 - input.eps);
+            let variance = k * input.eps * (1.0 - input.eps);
+            let std_dev = variance.sqrt();
+            let gauss = GaussianDistribution::new(mean, std_dev);
+
+            let likelihood = if sampled == 0 {
+                gauss.calc_cumulative_dist(x + 0.5)
+            } else {
+                gauss.calc_cumulative_dist(x + 0.5) - gauss.calc_cumulative_dist(x - 0.5)
             }
+            .max(f64::MIN_POSITIVE);
+            let log_likelihood = likelihood.ln();
 
-            log_likelihoods
-        };
-
-        let mut likelihood_prefix_sum = vec![0.0];
-
-        for i in 0..log_likelihoods.len() {
-            likelihood_prefix_sum.push(likelihood_prefix_sum[i] + log_likelihoods[i].exp());
+            log_likelihoods.push(log_likelihood);
         }
 
         Self {
             pos,
             log_likelihoods,
-            likelihood_prefix_sum,
         }
-    }
-
-    fn sum_likelihood(&self, range: Range<usize>) -> f64 {
-        self.likelihood_prefix_sum[range.end] - self.likelihood_prefix_sum[range.start]
     }
 }
