@@ -306,7 +306,7 @@ pub(super) fn generate_states(
     let oil_count_dist = WeightedAliasIndex::new(vec![0, 0, 60, 10]).unwrap();
 
     loop {
-        let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
+        let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
 
         if time >= 1.0 {
             break;

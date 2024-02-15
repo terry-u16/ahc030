@@ -53,7 +53,7 @@ impl Solver for MultiDigSolver {
 
         for turn in 0..input.map_size * input.map_size * 2 {
             // TLE緊急回避モード
-            if since.elapsed().as_secs_f64() >= 2.8 {
+            if input.duration_corrector.elapsed(since).as_secs_f64() >= 2.8 {
                 if self.answer_all(&states, input).is_ok() {
                     return;
                 }
@@ -132,6 +132,7 @@ impl Solver for MultiDigSolver {
                 turn_duration * 0.3 * time_mul,
                 &mut rng,
             );
+
             let sampled = self.judge.query_multiple(&targets);
             let observation = Observation::new(targets, sampled, input);
 

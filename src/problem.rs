@@ -1,4 +1,7 @@
-use crate::grid::{Coord, Map2d};
+use crate::{
+    common::DurationCorrector,
+    grid::{Coord, Map2d},
+};
 use im_rc::HashMap;
 use itertools::Itertools;
 use proconio::{input, source::line::LineSource};
@@ -17,6 +20,7 @@ pub struct Input {
     pub eps: f64,
     pub oils: Vec<Oils>,
     pub hashes: Vec<Map2d<u64>>,
+    pub duration_corrector: DurationCorrector,
 }
 
 impl Input {
@@ -43,12 +47,15 @@ impl Input {
             hashes.push(map);
         }
 
+        let duration_corrector = DurationCorrector::from_env();
+
         Self {
             map_size,
             oil_count,
             eps,
             oils,
             hashes,
+            duration_corrector,
         }
     }
 }
