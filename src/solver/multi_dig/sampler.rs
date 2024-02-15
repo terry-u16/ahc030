@@ -32,6 +32,11 @@ pub(super) fn select_sample_points(
         .copied()
         .collect_vec();
 
+    let Ok(env) = Env::new(input, mcmc_states.clone(), max_sample_count) else {
+        // エントロピーを計算できないのでランダムなものを返す
+        return sampled_coords;
+    };
+
     let mut map = Map2d::new_with(false, input.map_size);
 
     for (&shift, oil) in mcmc_states[0].shift.iter().zip(input.oils.iter()) {
@@ -40,13 +45,11 @@ pub(super) fn select_sample_points(
         }
     }
 
-    let Ok(env) = Env::new(input, mcmc_states, max_sample_count) else {
-        // エントロピーを計算できないのでランダムなものを返す
-        return sampled_coords;
-    };
-
-    let count = map.iter().filter(|&&b| !b).count();
-    let flip = count >= max_sample_count;
+    for (&shift, oil) in mcmc_states[1].shift.iter().zip(input.oils.iter()) {
+        for &p in oil.pos.iter() {
+            map[p + shift] = true;
+        }
+    }
 
     let mut sampled_coords = vec![];
 
@@ -54,7 +57,7 @@ pub(super) fn select_sample_points(
         for col in 0..input.map_size {
             let c = Coord::new(row, col);
 
-            if !map[c] ^ flip {
+            if map[c] {
                 sampled_coords.push(c);
             }
         }
@@ -555,6 +558,9 @@ fn annealing(
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
+    let mut counts = [0; 2];
+    let mut acc = [0; 2];
+
     loop {
         all_iter += 1;
         if (all_iter & ((1 << 4) - 1)) == 0 {
@@ -566,11 +572,13 @@ fn annealing(
         }
 
         // 変形
-        let mut new_state = if rng.gen_bool(0.5) {
-            solution.clone().neigh_flip_single(env, rng)
+        let (mut new_state, t) = if rng.gen_bool(0.5) {
+            (solution.clone().neigh_flip_single(env, rng), 0)
         } else {
-            solution.clone().neigh_flip_double(env, rng)
+            (solution.clone().neigh_flip_double(env, rng), 1)
         };
+
+        counts[t] += 1;
 
         // スコア計算
         let new_score = new_state.calc_score(env, prob_table);
@@ -583,6 +591,7 @@ fn annealing(
             current_score = new_score;
             accepted_count += 1;
             solution = new_state;
+            acc[t] += 1;
 
             if best_score.change_max(current_score) {
                 best_solution = solution.clone();
@@ -600,6 +609,8 @@ fn annealing(
     eprintln!("valid iter : {}", valid_iter);
     eprintln!("accepted   : {}", accepted_count);
     eprintln!("updated    : {}", update_count);
+    eprintln!("{} / {}", acc[0], counts[0]);
+    eprintln!("{} / {}", acc[1], counts[1]);
     eprintln!("");
 
     best_solution

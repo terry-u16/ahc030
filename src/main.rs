@@ -17,7 +17,7 @@ fn main() {
     let mut judge = Judge::new();
     let input = judge.read_input();
 
-    let mut solver: Box<dyn Solver> = if input.oil_count <= 10 {
+    let mut solver: Box<dyn Solver> = if input.oil_count <= 12 {
         Box::new(solver::multi_dig::MultiDigSolver::new(judge))
     } else {
         Box::new(solver::single_dig::SingleDigSolver::new(judge))
