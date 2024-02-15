@@ -26,9 +26,9 @@ pub(super) struct State {
 impl State {
     pub(super) fn new(shift: Vec<CoordDiff>, env: &Env) -> Self {
         let mut log_likelihood = 0.0;
-        let counts = vec![0; env.observations.len()];
+        let counts = vec![0; env.obs.observations.len()];
 
-        for (obs, &count) in env.observations.iter().zip(counts.iter()) {
+        for (obs, &count) in env.obs.observations.iter().zip(counts.iter()) {
             log_likelihood += obs.log_likelihoods[count];
         }
 
@@ -56,11 +56,11 @@ impl State {
 
     fn add_oil(&mut self, env: &Env, oil_i: usize, shift: CoordDiff) {
         self.shift[oil_i] = shift;
-        let indices = &env.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
+        let indices = &env.obs.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
         self.hash ^= env.input.hashes[oil_i][Coord::try_from(shift).unwrap()];
 
         for &(obs_i, cnt) in indices {
-            let observation = &env.observations[obs_i];
+            let observation = &env.obs.observations[obs_i];
             let count = &mut self.counts[obs_i];
             self.log_likelihood -= observation.log_likelihoods[*count];
             *count += cnt;
@@ -70,11 +70,11 @@ impl State {
 
     fn remove_oil(&mut self, env: &Env, oil_i: usize) {
         let shift = self.shift[oil_i];
-        let indices = &env.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
+        let indices = &env.obs.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
         self.hash ^= env.input.hashes[oil_i][Coord::try_from(shift).unwrap()];
 
         for &(obs_i, cnt) in indices.iter() {
-            let observation = &env.observations[obs_i];
+            let observation = &env.obs.observations[obs_i];
             let count = &mut self.counts[obs_i];
             self.log_likelihood -= observation.log_likelihoods[*count];
             *count -= cnt;
@@ -83,11 +83,11 @@ impl State {
     }
 
     fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
-        let indices = &env.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
+        let indices = &env.obs.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
         let mut log_likelihood = self.log_likelihood;
 
         for &(obs_i, cnt) in indices {
-            let observation = &env.observations[obs_i];
+            let observation = &env.obs.observations[obs_i];
             let mut count = self.counts[obs_i];
             log_likelihood -= observation.log_likelihoods[count];
             count += cnt;
@@ -98,11 +98,11 @@ impl State {
     }
 
     pub(super) fn add_last_observation(&mut self, env: &Env) {
-        assert!(self.counts.len() + 1 == env.observations.len());
+        assert!(self.counts.len() + 1 == env.obs.observations.len());
 
         let mut count = 0;
-        let overlaps = env.overlaps.last().unwrap();
-        let observation = env.observations.last().unwrap();
+        let overlaps = env.obs.overlaps.last().unwrap();
+        let observation = env.obs.observations.last().unwrap();
 
         for (&shift, overlap) in self.shift.iter().zip(overlaps.iter()) {
             count += overlap[Coord::try_from(shift).unwrap()];
