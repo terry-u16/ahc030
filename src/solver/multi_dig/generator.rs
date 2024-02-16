@@ -123,7 +123,10 @@ impl State {
             .iter()
             .map(|c| {
                 let len = c.len();
-                let cand_ren = rng.gen_range(len / 4..=len).max(10).min(c.len());
+                let ratio = rng.gen_range(0.3..=1.0);
+                let cand_ren = ((len as f64 * ratio * ratio).ceil() as usize)
+                    .max(5)
+                    .min(len);
                 cand_ren
             })
             .collect_vec();
@@ -131,9 +134,12 @@ impl State {
         // 同じ場所への配置を許可しない
         let last_shifts = self.shift.clone();
         let mut taboos = vec![false; env.input.oil_count];
-        let taboo = oil_indices.choose(rng).copied().unwrap();
-        if env.obs.shift_candidates[taboo].len() > 1 {
-            taboos[taboo] = true;
+
+        if rng.gen_bool(0.5) {
+            let taboo = oil_indices.choose(rng).copied().unwrap();
+            if env.obs.shift_candidates[taboo].len() > 1 {
+                taboos[taboo] = true;
+            }
         }
 
         for &oil_i in oil_indices.iter() {
