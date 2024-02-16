@@ -19,7 +19,7 @@ pub(super) fn select_sample_points(
     max_sample_count: usize,
     duration: f64,
     rng: &mut impl Rng,
-) -> (Vec<Coord>, f64, f64) {
+) -> Vec<Coord> {
     assert!(max_sample_count > 0);
     assert!(input.map_size * input.map_size >= max_sample_count);
 
@@ -34,7 +34,7 @@ pub(super) fn select_sample_points(
 
     let Ok(env) = Env::new(input, mcmc_states.clone(), max_sample_count) else {
         // エントロピーを計算できないのでランダムなものを返す
-        return (sampled_coords, 1.0, 1.0);
+        return sampled_coords;
     };
 
     let mut map = Map2d::new_with(false, input.map_size);
@@ -64,7 +64,7 @@ pub(super) fn select_sample_points(
     }
 
     let state = State::new(&env, &sampled_coords);
-    let mut state = annealing(&env, state, prob_table, duration, rng);
+    let state = annealing(&env, state, prob_table, duration, rng);
 
     let mut result = vec![];
 
@@ -78,12 +78,7 @@ pub(super) fn select_sample_points(
         }
     }
 
-    let entropy = unsafe { state.calc_conditional_entropy(&env, prob_table) };
-    let mutual_information = env.base_entropy - entropy;
-
-    eprintln!("entropy: {:.3} -> {:.3}", env.base_entropy, entropy);
-
-    (result, mutual_information, entropy)
+    result
 }
 
 pub(super) struct ProbTable {
@@ -627,16 +622,16 @@ fn annealing(
         valid_iter += 1;
     }
 
-    //eprintln!("===== annealing =====");
-    //eprintln!("init score : {}", init_score);
-    //eprintln!("score      : {}", best_score);
-    //eprintln!("all iter   : {}", all_iter);
-    //eprintln!("valid iter : {}", valid_iter);
-    //eprintln!("accepted   : {}", accepted_count);
-    //eprintln!("updated    : {}", update_count);
-    //eprintln!("{} / {}", acc[0], counts[0]);
-    //eprintln!("{} / {}", acc[1], counts[1]);
-    //eprintln!("");
+    eprintln!("===== annealing =====");
+    eprintln!("init score : {}", init_score);
+    eprintln!("score      : {}", best_score);
+    eprintln!("all iter   : {}", all_iter);
+    eprintln!("valid iter : {}", valid_iter);
+    eprintln!("accepted   : {}", accepted_count);
+    eprintln!("updated    : {}", update_count);
+    eprintln!("{} / {}", acc[0], counts[0]);
+    eprintln!("{} / {}", acc[1], counts[1]);
+    eprintln!("");
 
     best_solution
 }

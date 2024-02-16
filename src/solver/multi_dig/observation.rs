@@ -287,16 +287,17 @@ pub(super) struct Observation {
 }
 
 impl Observation {
-    pub(super) fn new(pos: Vec<Coord>, sampled: &[i32], input: &Input) -> Self {
+    pub(super) fn new(pos: Vec<Coord>, sampled: i32, input: &Input) -> Self {
         assert!(pos.len() > 0);
 
         let likelihoods_len = pos.len() * input.oil_count + 1;
         let k = pos.len() as f64;
+        let x = sampled as f64;
 
         // k = 1のときは特別扱い
         let log_likelihoods = if pos.len() == 1 {
             let mut log_likelihoods = vec![f64::MIN_POSITIVE.ln(); likelihoods_len];
-            log_likelihoods[sampled[0] as usize] = 0.0;
+            log_likelihoods[sampled as usize] = 0.0;
             log_likelihoods
         } else {
             let mut log_likelihoods = Vec::with_capacity(likelihoods_len);
@@ -307,19 +308,13 @@ impl Observation {
                 let variance = k * input.eps * (1.0 - input.eps);
                 let std_dev = variance.sqrt();
                 let gauss = GaussianDistribution::new(mean, std_dev);
-                let mut likelihood = 1.0;
 
-                for &x in sampled {
-                    likelihood *= if x == 0 {
-                        gauss.calc_cumulative_dist(x as f64 + 0.5)
-                    } else {
-                        gauss.calc_cumulative_dist(x as f64 + 0.5)
-                            - gauss.calc_cumulative_dist(x as f64 - 0.5)
-                    };
+                let likelihood = if sampled == 0 {
+                    gauss.calc_cumulative_dist(x + 0.5)
+                } else {
+                    gauss.calc_cumulative_dist(x + 0.5) - gauss.calc_cumulative_dist(x - 0.5)
                 }
-
-                likelihood.change_max(f64::MIN_POSITIVE);
-
+                .max(f64::MIN_POSITIVE);
                 let log_likelihood = likelihood.ln();
 
                 log_likelihoods.push(log_likelihood);
