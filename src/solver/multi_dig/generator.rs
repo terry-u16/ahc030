@@ -312,7 +312,7 @@ pub(super) fn generate_states(
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![0, 0, 60, 10]).unwrap();
+    let oil_count_dist = WeightedAliasIndex::new(vec![0, 0, 60, 20, 10, 5]).unwrap();
 
     loop {
         let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
