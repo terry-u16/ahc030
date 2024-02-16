@@ -337,7 +337,7 @@ pub(super) fn generate_states(
             // 適切にサンプリングできればよいので、重みは適当に上限を設ける
             let mut p = (new_state.log_likelihood - base_log_likelihood).exp()
                 + prefix_prob.last().unwrap().0;
-            p.change_min(10.0);
+            p.change_min(1e200);
             prefix_prob.push(OrderedFloat(p));
             states.push(new_state);
 
