@@ -113,10 +113,58 @@ impl State {
         self.counts.push(count);
     }
 
-    fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+    fn neigh(self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
+        self.break_and_reconstruct(env, rng, &oil_indices)
+    }
 
+    fn neigh2(self, env: &Env, rng: &mut impl Rng) -> Self {
+        let mut map = Map2d::new_with(0u32, env.input.map_size);
+
+        for (i, (&shift, oil)) in self.shift.iter().zip(&env.input.oils).enumerate() {
+            for &p in oil.pos.iter() {
+                map[p + shift] |= 1 << i;
+            }
+        }
+
+        let mut candidates = vec![];
+        let mut weights = vec![];
+
+        for &flag in map.iter() {
+            let cnt = flag.count_ones();
+
+            if cnt >= 2 {
+                candidates.push(flag);
+                weights.push(cnt);
+            }
+        }
+
+        if candidates.len() == 0 {
+            return self;
+        }
+
+        let weights = WeightedIndex::new(&weights).unwrap();
+        let flag = candidates[weights.sample(rng)];
+
+        let mut oil_indices = vec![];
+
+        for i in 0..env.input.oil_count {
+            if ((flag >> i) & 1) > 0 {
+                oil_indices.push(i);
+            }
+        }
+
+        oil_indices.shuffle(rng);
+        self.break_and_reconstruct(env, rng, &oil_indices)
+    }
+
+    fn break_and_reconstruct(
+        mut self,
+        env: &Env,
+        rng: &mut impl Rng,
+        oil_indices: &[usize],
+    ) -> Self {
         let cand_lens = env
             .obs
             .shift_candidates
@@ -329,8 +377,13 @@ pub(super) fn generate_states(
             .binary_search(&OrderedFloat(x))
             .unwrap_or_else(|x| x);
         let state = states[index].clone();
-        let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
-        let new_state = state.neigh(env, rng, oil_count);
+
+        let new_state = if rng.gen_bool(0.95) {
+            let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
+            state.neigh(env, rng, oil_count)
+        } else {
+            state.neigh2(env, rng)
+        };
 
         if hashes.insert(new_state.hash) {
             // 凄く大きな値を引いてしまうとオーバーフローする可能性があるため注意
