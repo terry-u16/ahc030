@@ -117,26 +117,33 @@ impl State {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
 
+        let cand_lens = env
+            .obs
+            .shift_candidates
+            .iter()
+            .map(|c| {
+                let len = c.len();
+                let cand_ren = rng.gen_range(len / 4..=len).max(10).min(c.len());
+                cand_ren
+            })
+            .collect_vec();
+
         // 同じ場所への配置を許可しない
         let last_shifts = self.shift.clone();
         let mut taboos = vec![false; env.input.oil_count];
         let taboo = oil_indices.choose(rng).copied().unwrap();
-        if env.input.oils[taboo].height < env.input.map_size
-            || env.input.oils[taboo].width < env.input.map_size
-        {
+        if env.obs.shift_candidates[taboo].len() > 1 {
             taboos[taboo] = true;
         }
 
         for &oil_i in oil_indices.iter() {
-            let oil = &env.input.oils[oil_i];
             self.remove_oil(env, oil_i);
 
             // 消したままだと貪欲の判断基準がおかしくなるので、ランダムな適当な場所に置いておく
-            let height = env.input.map_size - oil.height + 1;
-            let width = env.input.map_size - oil.width + 1;
-            let dr = rng.gen_range(0..height) as isize;
-            let dc = rng.gen_range(0..width) as isize;
-            let shift = CoordDiff::new(dr, dc);
+            let shift = env.obs.shift_candidates[oil_i][..cand_lens[oil_i]]
+                .choose(rng)
+                .copied()
+                .unwrap();
             self.add_oil(env, oil_i, shift);
         }
 
@@ -152,20 +159,16 @@ impl State {
             // 消し直す
             self.remove_oil(env, oil_i);
 
-            for row in 0..height {
-                for col in 0..width {
-                    let shift = CoordDiff::new(row as isize, col as isize);
-
-                    // 同じ場所への配置を許可しない
-                    if taboos[oil_i] && shift == last_shifts[oil_i] {
-                        continue;
-                    }
-
-                    let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
-                    shifts.push(shift);
-                    log_likelihoods.push(log_likelihood);
-                    max_log_likelihood.change_max(log_likelihood);
+            for &shift in env.obs.shift_candidates[oil_i][..cand_lens[oil_i]].iter() {
+                // 同じ場所への配置を許可しない
+                if taboos[oil_i] && shift == last_shifts[oil_i] {
+                    continue;
                 }
+
+                let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
+                shifts.push(shift);
+                log_likelihoods.push(log_likelihood);
+                max_log_likelihood.change_max(log_likelihood);
             }
 
             let likelihoods = log_likelihoods
@@ -338,10 +341,10 @@ pub(super) fn generate_states(
         valid_iter += 1;
     }
 
-    eprintln!(
-        "all_iter: {} valid_iter: {} accepted_count: {}",
-        all_iter, valid_iter, accepted_count
-    );
+    //eprintln!(
+    //    "all_iter: {} valid_iter: {} accepted_count: {}",
+    //    all_iter, valid_iter, accepted_count
+    //);
 
     states
 }
