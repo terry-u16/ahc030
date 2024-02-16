@@ -48,6 +48,7 @@ impl Solver for MultiDigSolver {
         } else {
             1.0
         };
+
         let turn_duration = all_time_mul * 2.0 / ((input.map_size as f64).powi(2) * 2.0);
         let since = Instant::now();
         let mut states = vec![State::new(
@@ -57,8 +58,10 @@ impl Solver for MultiDigSolver {
         let mut prob_table = ProbTable::new(input);
 
         const ANSWER_THRESHOLD_RATIO: f64 = 100.0;
+        let mut turn = 0;
+        let mut next_time_mul = 1.0;
 
-        for turn in 0..input.map_size * input.map_size * 2 {
+        for _ in 0..input.map_size * input.map_size * 2 {
             // TLE緊急回避モード
             if input.duration_corrector.elapsed(since).as_secs_f64() >= 2.95 {
                 if self.answer_all(&states, input).is_ok() {
@@ -72,15 +75,13 @@ impl Solver for MultiDigSolver {
                 return;
             }
 
-            eprint!("turn {}: ", turn);
-
-            for cands in &env.obs.shift_candidates {
-                eprint!("{} ", cands.len());
-            }
-            eprintln!();
-
             // 新たな置き方を生成
-            states = generator::generate_states(&env, states, turn_duration * 0.7, &mut rng);
+            states = generator::generate_states(
+                &env,
+                states,
+                turn_duration * 0.7 * next_time_mul,
+                &mut rng,
+            );
             states.sort_unstable();
             states.dedup();
             states.shuffle(&mut rng);
@@ -138,17 +139,33 @@ impl Solver for MultiDigSolver {
                 input.map_size * input.map_size / 8
             };
 
-            let targets = sampler::select_sample_points(
+            let (targets, mutual_info, entropy) = sampler::select_sample_points(
                 input,
                 &mut prob_table,
                 states.clone(),
                 max_sample_count,
-                turn_duration * 0.3 * time_mul,
+                turn_duration * 0.3 * time_mul * next_time_mul,
                 &mut rng,
             );
 
-            let sampled = self.judge.query_multiple(&targets);
-            let observation = Observation::new(targets, sampled, input);
+            let mut sampled = vec![];
+
+            eprintln!("[turn {}] mutual_info: {}", turn, mutual_info);
+
+            let sample_cnt = if mutual_info >= 0.5 || entropy < 0.7 {
+                1
+            } else {
+                2
+            };
+
+            for _ in 0..sample_cnt {
+                sampled.push(self.judge.query_multiple(&targets));
+            }
+
+            turn += sample_cnt;
+            next_time_mul = sample_cnt as f64;
+
+            let observation = Observation::new(targets, &sampled, input);
 
             env.obs.add_observation(input, observation);
 
