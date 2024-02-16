@@ -327,10 +327,10 @@ struct State {
     conditional_entropy: Option<f64>,
     selected: IndexSet,
     not_selected: IndexSet,
+    overlap_counts: Vec<usize>,
 }
 
 static mut STATIC_INIT: bool = false;
-static mut OVERLAP_COUNTS: Vec<usize> = vec![];
 static mut P_OBS: Vec<f64> = vec![];
 static mut P_OIL_OBS: Vec<Vec<f64>> = vec![];
 static mut P_LOG2_OIL_OBS: Vec<Vec<f64>> = vec![];
@@ -338,10 +338,10 @@ static mut P_OIL_OBS_RANGES: Vec<Range<usize>> = vec![];
 
 impl State {
     fn new(env: &Env, selected_coords: &[Coord]) -> Self {
-        let mut map = Map2d::new_with(false, env.input.map_size);
+        let mut selected_map = Map2d::new_with(false, env.input.map_size);
 
         for &c in selected_coords.iter() {
-            map[c] = true;
+            selected_map[c] = true;
         }
 
         let selected_count = selected_coords.len();
@@ -355,7 +355,7 @@ impl State {
                 let c = Coord::new(row, col);
                 let i = row * env.input.map_size + col;
 
-                if map[c] {
+                if selected_map[c] {
                     selected.add(i);
                 } else {
                     not_selected.add(i);
@@ -363,12 +363,25 @@ impl State {
             }
         }
 
+        let mut overlap_counts = vec![];
+
+        for state_map in env.state_maps.iter() {
+            let mut count = 0;
+
+            for (&v, &b) in state_map.iter().zip(selected_map.iter()) {
+                count += v * b as usize;
+            }
+
+            overlap_counts.push(count);
+        }
+
         Self {
-            map,
+            map: selected_map,
             selected_count,
             conditional_entropy: None,
             selected,
             not_selected,
+            overlap_counts,
         }
     }
 
@@ -391,18 +404,7 @@ impl State {
         let col = index % env.input.map_size;
         let coord = Coord::new(row, col);
 
-        if self.map[coord] {
-            self.selected_count -= 1;
-            self.selected.remove(index);
-            self.not_selected.add(index);
-        } else {
-            self.selected_count += 1;
-            self.selected.add(index);
-            self.not_selected.remove(index);
-        }
-
-        self.map[coord] ^= true;
-        self.conditional_entropy = None;
+        self.flip(env, coord);
 
         self
     }
@@ -425,17 +427,35 @@ impl State {
         let col1 = index1 % env.input.map_size;
         let coord1 = Coord::new(row1, col1);
 
-        self.map[coord0] ^= true;
-        self.map[coord1] ^= true;
-
-        self.selected.remove(index0);
-        self.selected.add(index1);
-        self.not_selected.remove(index1);
-        self.not_selected.add(index0);
-
-        self.conditional_entropy = None;
+        self.flip(env, coord0);
+        self.flip(env, coord1);
 
         self
+    }
+
+    fn flip(&mut self, env: &Env, c: Coord) {
+        let index = c.row * env.input.map_size + c.col;
+
+        if self.map[c] {
+            self.selected_count -= 1;
+            self.selected.remove(index);
+            self.not_selected.add(index);
+
+            for (cnt, map) in self.overlap_counts.iter_mut().zip(env.state_maps.iter()) {
+                *cnt -= map[c];
+            }
+        } else {
+            self.selected_count += 1;
+            self.selected.add(index);
+            self.not_selected.remove(index);
+
+            for (cnt, map) in self.overlap_counts.iter_mut().zip(env.state_maps.iter()) {
+                *cnt += map[c];
+            }
+        }
+
+        self.map[c] ^= true;
+        self.conditional_entropy = None;
     }
 
     /// 条件付きエントロピーを計算する
@@ -454,23 +474,10 @@ impl State {
             STATIC_INIT = true;
         }
 
-        let counts = &mut OVERLAP_COUNTS;
-        counts.clear();
-
-        for map in env.state_maps.iter() {
-            let mut count = 0;
-
-            for (&v, &b) in map.iter().zip(self.map.iter()) {
-                count += v * b as usize;
-            }
-
-            counts.push(count);
-        }
-
         // obs_vの最大値を取得する
         let mut max_obs_v = 0;
 
-        for &count in counts.iter() {
+        for &count in self.overlap_counts.iter() {
             let range = prob_table.range(&env.input, self.selected_count, count);
             max_obs_v.change_max(range.end);
         }
@@ -484,7 +491,7 @@ impl State {
 
         // 確率の表を作成する
         for (counts, state_prob, state_prob_log2, p_oil_obs, p_log2_oil_obs) in izip!(
-            counts,
+            &self.overlap_counts,
             &env.probs,
             &env.probs_log2,
             p_oil_obs.iter_mut(),
