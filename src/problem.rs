@@ -10,6 +10,7 @@ use rand_pcg::Pcg64Mcg;
 use rustc_hash::FxHashSet;
 use std::{
     cmp::Reverse,
+    fmt::Display,
     io::{self, BufReader},
 };
 
@@ -81,6 +82,26 @@ impl Oils {
             height,
             len,
         }
+    }
+}
+
+impl Display for Oils {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut map = vec![vec![false; self.width]; self.height];
+
+        for p in &self.pos {
+            map[p.row][p.col] = true;
+        }
+
+        for row in 0..self.height {
+            for col in 0..self.width {
+                write!(f, "{}", if map[row][col] { '#' } else { '.' })?;
+            }
+
+            writeln!(f)?;
+        }
+
+        Ok(())
     }
 }
 
