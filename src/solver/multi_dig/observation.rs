@@ -1,14 +1,12 @@
-use std::{cmp::Reverse, ops::Range};
-
-use itertools::Itertools;
-use ordered_float::OrderedFloat;
-
 use crate::{
     common::ChangeMinMax,
     distributions::GaussianDistribution,
     grid::{Coord, CoordDiff, Map2d},
     problem::Input,
 };
+use itertools::Itertools;
+use ordered_float::OrderedFloat;
+use std::cmp::Reverse;
 
 #[derive(Debug, Clone)]
 pub(super) struct ObservationManager {
@@ -204,10 +202,8 @@ impl ObservationManager {
             indices.sort_unstable_by_key(|&i| Reverse(OrderedFloat(likelihoods[i])));
 
             let mut result = vec![];
-            let mut sum = 0.0;
 
-            for (i, &index) in indices.iter().enumerate() {
-                sum += likelihoods[index];
+            for &index in indices.iter() {
                 result.push(all_shifts[index]);
             }
 
@@ -304,7 +300,6 @@ pub(super) struct Observation {
     pub likelihoods: Vec<f64>,
     /// k番目の要素はΣv(pi)=kとなる対数尤度を表す
     pub log_likelihoods: Vec<f64>,
-    likelihood_prefix_sum: Vec<f64>,
 }
 
 impl Observation {
@@ -356,11 +351,6 @@ impl Observation {
             pos,
             likelihoods,
             log_likelihoods,
-            likelihood_prefix_sum,
         }
-    }
-
-    fn sum_likelihood(&self, range: Range<usize>) -> f64 {
-        self.likelihood_prefix_sum[range.end] - self.likelihood_prefix_sum[range.start]
     }
 }

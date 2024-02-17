@@ -87,9 +87,7 @@ impl State {
         }
     }
 
-    #[target_feature(
-        enable = "aes,avx,avx2,bmi1,bmi2,fma,fxsr,pclmulqdq,popcnt,rdrand,rdseed,sse,sse2,sse4.1,sse4.2,ssse3,xsave,xsavec,xsaveopt,xsaves"
-    )]
+    #[target_feature(enable = "avx,avx2")]
     unsafe fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
         use std::arch::x86_64::*;
 
