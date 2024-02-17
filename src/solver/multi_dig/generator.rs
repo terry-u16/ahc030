@@ -3,7 +3,7 @@ use crate::{
     grid::{Coord, CoordDiff, Map2d},
     problem::Input,
 };
-use itertools::Itertools as _;
+use itertools::{izip, Itertools as _};
 use ordered_float::OrderedFloat;
 use rand::{
     seq::{IteratorRandom as _, SliceRandom as _},
@@ -20,6 +20,7 @@ pub(super) struct State {
     pub shift: Vec<CoordDiff>,
     pub log_likelihood: f64,
     counts: Vec<usize>,
+    counts_u32: Vec<u32>,
     hash: u64,
 }
 
@@ -27,6 +28,7 @@ impl State {
     pub(super) fn new(shift: Vec<CoordDiff>, env: &Env) -> Self {
         let mut log_likelihood = 0.0;
         let counts = vec![0; env.obs.observations.len()];
+        let counts_i32 = vec![0; env.obs.observations.len()];
 
         for (obs, &count) in env.obs.observations.iter().zip(counts.iter()) {
             log_likelihood += obs.log_likelihoods[count];
@@ -42,6 +44,7 @@ impl State {
             shift,
             log_likelihood,
             counts,
+            counts_u32: counts_i32,
             hash,
         };
 
@@ -65,6 +68,7 @@ impl State {
             self.log_likelihood -= observation.log_likelihoods[*count];
             *count += cnt;
             self.log_likelihood += observation.log_likelihoods[*count];
+            self.counts_u32[obs_i] = *count as u32;
         }
     }
 
@@ -79,6 +83,7 @@ impl State {
             self.log_likelihood -= observation.log_likelihoods[*count];
             *count -= cnt;
             self.log_likelihood += observation.log_likelihoods[*count];
+            self.counts_u32[obs_i] = *count as u32;
         }
     }
 
@@ -86,19 +91,60 @@ impl State {
         enable = "aes,avx,avx2,bmi1,bmi2,fma,fxsr,pclmulqdq,popcnt,rdrand,rdseed,sse,sse2,sse4.1,sse4.2,ssse3,xsave,xsavec,xsaveopt,xsaves"
     )]
     unsafe fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
-        let cnt = &env.obs.relative_observation_cnt[oil_i][Coord::try_from(shift).unwrap()];
-        let mut log_likelihood = 0.0;
+        use std::arch::x86_64::*;
 
-        for (observation, (&count, &cnt)) in env
-            .obs
-            .obs_log_likelihoods
-            .iter()
-            .zip(self.counts.iter().zip(cnt.iter()))
-        {
-            log_likelihood += unsafe { observation.get_unchecked(count + cnt) };
+        // AVX2を使って高速化
+        let log_likelihoods = &env.obs.obs_log_likelihoods;
+        let mut offsets: &[u32] = &env.obs.obs_log_likelihoods_offsets;
+        let mut cnts: &[u32] = &self.counts_u32;
+
+        let mut cnts_added: &[u32] =
+            &env.obs.relative_observation_cnt_u32[oil_i][Coord::try_from(shift).unwrap()];
+        let mut log_likelihood = _mm256_broadcast_ss(&0.0);
+
+        const ELEMENTS_PER_256BIT: usize = 8;
+
+        while offsets.len() >= ELEMENTS_PER_256BIT {
+            // j番目の観測が保存されている箇所の先頭のindex
+            let offset = _mm256_loadu_si256(offsets.as_ptr() as *const __m256i);
+
+            // j番目の観測について、現在の配置だと仮定したときの真の埋蔵量
+            let cnt = _mm256_loadu_si256(cnts.as_ptr() as *const __m256i);
+
+            // oil_iを追加したときの真の埋蔵量の増加量
+            let cnt_added = _mm256_loadu_si256(cnts_added.as_ptr() as *const __m256i);
+
+            // offset, cnt, cnt_addedを足す
+            let offset = _mm256_add_epi32(offset, cnt);
+            let offset = _mm256_add_epi32(offset, cnt_added);
+
+            // log_likelihoodsからoffsetの位置にある値を取得
+            let likelihoods = _mm256_i32gather_ps::<4>(log_likelihoods.as_ptr(), offset);
+
+            // 取得した値をlog_likelihoodに足す
+            log_likelihood = _mm256_add_ps(log_likelihood, likelihoods);
+
+            // ポインタを進める（float型は256bitレジスタに8個入る）
+            offsets = offsets.get_unchecked(ELEMENTS_PER_256BIT..);
+            cnts = cnts.get_unchecked(ELEMENTS_PER_256BIT..);
+            cnts_added = cnts_added.get_unchecked(ELEMENTS_PER_256BIT..);
         }
 
-        log_likelihood
+        // TODO: 水平加算を理解する
+        let mut buffer = [0.0; ELEMENTS_PER_256BIT];
+        _mm256_storeu_ps(buffer.as_mut_ptr(), log_likelihood);
+        let mut log_likelihood = 0.0;
+
+        for &v in buffer.iter() {
+            log_likelihood += v;
+        }
+
+        for (&offset, &cnt, &cnt_added) in izip!(offsets, cnts, cnts_added) {
+            let index = offset + cnt + cnt_added;
+            log_likelihood += log_likelihoods[index as usize];
+        }
+
+        log_likelihood as f64
     }
 
     pub(super) fn add_last_observation(&mut self, env: &Env) {
@@ -115,6 +161,7 @@ impl State {
         self.log_likelihood += observation.log_likelihoods[count];
 
         self.counts.push(count);
+        self.counts_u32.push(count as u32);
     }
 
     fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
@@ -351,10 +398,10 @@ pub(super) fn generate_states(
         valid_iter += 1;
     }
 
-    //eprintln!(
-    //    "all_iter: {} valid_iter: {} accepted_count: {}",
-    //    all_iter, valid_iter, accepted_count
-    //);
+    eprintln!(
+        "all_iter: {} valid_iter: {} accepted_count: {}",
+        all_iter, valid_iter, accepted_count
+    );
 
     states
 }

@@ -13,11 +13,13 @@ use crate::{
 #[derive(Debug, Clone)]
 pub(super) struct ObservationManager {
     pub observations: Vec<Observation>,
-    pub obs_log_likelihoods: Vec<Vec<f64>>,
+    pub obs_log_likelihoods: Vec<f32>,
+    pub obs_log_likelihoods_offsets: Vec<u32>,
     /// indices[oil_i][shift] := 影響するobs_iのVec
     pub relative_observation_indices: Vec<Map2d<Vec<usize>>>,
     /// indices[oil_i][shift] := 影響するcountのVec
     pub relative_observation_cnt: Vec<Map2d<Vec<usize>>>,
+    pub relative_observation_cnt_u32: Vec<Map2d<Vec<u32>>>,
     /// indices[obs_i] := 影響する (oil_i, count, shift) のVec
     pub inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
     /// matrix[obs_i][oil_i][shift] := oil_iをshiftだけ動かした領域とobs_iの重なりの数
@@ -35,6 +37,9 @@ impl ObservationManager {
             .map(|_| Map2d::new_with(vec![], input.map_size))
             .collect();
         let relative_observation_cnt = (0..input.oil_count)
+            .map(|_| Map2d::new_with(vec![], input.map_size))
+            .collect();
+        let relative_observation_cnt_u32 = (0..input.oil_count)
             .map(|_| Map2d::new_with(vec![], input.map_size))
             .collect();
         let observations = vec![];
@@ -64,8 +69,10 @@ impl ObservationManager {
         Self {
             observations,
             obs_log_likelihoods: vec![],
+            obs_log_likelihoods_offsets: vec![],
             relative_observation_indices,
             relative_observation_cnt,
+            relative_observation_cnt_u32,
             inv_relative_observation_indices,
             overlaps,
             shift_candidates,
@@ -76,8 +83,13 @@ impl ObservationManager {
 
     pub(super) fn add_observation(&mut self, input: &Input, observation: Observation) {
         let obs_id = self.observations.len();
-        self.obs_log_likelihoods
-            .push(observation.log_likelihoods.clone());
+
+        self.obs_log_likelihoods_offsets
+            .push(self.obs_log_likelihoods.len() as u32);
+
+        for &v in observation.log_likelihoods.iter() {
+            self.obs_log_likelihoods.push(v as f32);
+        }
 
         // 観測による条件式の更新
         let mut observed_map = Map2d::new_with(false, input.map_size);
@@ -115,6 +127,7 @@ impl ObservationManager {
                     overlap_max.change_max(count);
                     self.relative_observation_indices[oil_i][c].push(obs_id);
                     self.relative_observation_cnt[oil_i][c].push(count);
+                    self.relative_observation_cnt_u32[oil_i][c].push(count as u32);
                     inv_relative_observation_indices.push((oil_i, count, shift));
                 }
             }
