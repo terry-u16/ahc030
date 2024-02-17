@@ -114,6 +114,7 @@ impl State {
     }
 
     fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+        let base_log_likelihood = self.log_likelihood;
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
 
@@ -154,7 +155,7 @@ impl State {
         }
 
         // ランダム性を入れた貪欲で場所を決めていく
-        for &oil_i in oil_indices.iter() {
+        for (iter, &oil_i) in oil_indices.iter().enumerate() {
             let height = env.input.map_size - env.input.oils[oil_i].height + 1;
             let width = env.input.map_size - env.input.oils[oil_i].width + 1;
             let candidate_count = height * width;
@@ -182,9 +183,26 @@ impl State {
                 .map(|&log_likelihood| f64::exp(log_likelihood - max_log_likelihood))
                 .collect_vec();
 
-            let dist = WeightedIndex::new(likelihoods).unwrap();
+            let candidates = if iter < choose_cnt - 1 {
+                (0..shifts.len()).collect_vec()
+            } else {
+                // 筋の良さそうなやつに絞る
+                let v = (0..shifts.len())
+                    .filter(|&i| log_likelihoods[i] >= base_log_likelihood)
+                    .collect_vec();
+
+                if v.len() > 0 {
+                    v
+                } else {
+                    (0..shifts.len()).collect_vec()
+                }
+            };
+
+            let weights = candidates.iter().map(|&i| likelihoods[i]).collect_vec();
+            let dist = WeightedIndex::new(weights).unwrap();
+
             let sample_i = dist.sample(rng);
-            let shift = shifts[sample_i];
+            let shift = shifts[candidates[sample_i]];
 
             self.add_oil(env, oil_i, shift);
         }
@@ -347,10 +365,10 @@ pub(super) fn generate_states(
         valid_iter += 1;
     }
 
-    //eprintln!(
-    //    "all_iter: {} valid_iter: {} accepted_count: {}",
-    //    all_iter, valid_iter, accepted_count
-    //);
+    eprintln!(
+        "all_iter: {} valid_iter: {} accepted_count: {}",
+        all_iter, valid_iter, accepted_count
+    );
 
     states
 }
