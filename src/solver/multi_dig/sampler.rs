@@ -505,24 +505,9 @@ impl State {
             p_oil_obs_ranges.push(range.clone());
             let p_obs = &mut p_obs[range];
 
-            for ((p_obs, p_oil_obs), &prob) in
-                p_obs.iter_mut().zip(p_oil_obs.iter_mut()).zip(prob.iter())
-            {
-                // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
-                // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
-                let p = prob * state_prob;
-                *p_obs += p;
-                *p_oil_obs = p;
-            }
-
-            for (p_log2_oil_obs, &prob_log2) in p_log2_oil_obs.iter_mut().zip(prob_log2.iter()) {
-                // 上と同じ処理のlog2版
-                let p_log2 = prob_log2 + state_prob_log2;
-                *p_log2_oil_obs = p_log2;
-            }
+            Self::add_p(p_obs, p_oil_obs, prob, *state_prob);
+            Self::add_p_log(p_log2_oil_obs, prob_log2, *state_prob_log2);
         }
-
-        let mut entropy = 0.0;
 
         for p in p_obs.iter_mut() {
             if *p == f64::MIN_POSITIVE {
@@ -533,6 +518,43 @@ impl State {
         }
 
         let p_obs_log2 = p_obs;
+
+        let entropy = Self::sum_entropy(p_oil_obs, p_log2_oil_obs, p_obs_log2, p_oil_obs_ranges);
+
+        self.conditional_entropy = Some(entropy);
+        entropy
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn add_p(p_obs: &mut [f64], p_oil_obs: &mut [f64], prob: &[f64], state_prob: f64) {
+        for ((p_obs, p_oil_obs), &prob) in
+            p_obs.iter_mut().zip(p_oil_obs.iter_mut()).zip(prob.iter())
+        {
+            // probは配置が確定したときに v_obs が観測される確率 p(v_obs | 配置)
+            // p(v_obs, 配置) = p(v_obs | 配置) * p(配置)
+            let p = prob * state_prob;
+            *p_obs += p;
+            *p_oil_obs = p;
+        }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn add_p_log(p_log2_oil_obs: &mut [f64], prob_log2: &[f64], state_prob_log2: f64) {
+        for (p_log2_oil_obs, &prob_log2) in p_log2_oil_obs.iter_mut().zip(prob_log2.iter()) {
+            // add_pのlog2版
+            let p_log2 = prob_log2 + state_prob_log2;
+            *p_log2_oil_obs = p_log2;
+        }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn sum_entropy(
+        p_oil_obs: &[Vec<f64>],
+        p_log2_oil_obs: &[Vec<f64>],
+        p_obs_log2: &[f64],
+        p_oil_obs_ranges: &[Range<usize>],
+    ) -> f64 {
+        let mut entropy = 0.0;
 
         for (p_oil_obs, p_log2_oil_obs, range) in izip!(
             p_oil_obs.iter(),
@@ -549,7 +571,6 @@ impl State {
             }
         }
 
-        self.conditional_entropy = Some(entropy);
         entropy
     }
 
