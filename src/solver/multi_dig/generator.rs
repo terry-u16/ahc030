@@ -87,64 +87,69 @@ impl State {
         }
     }
 
-    #[target_feature(
-        enable = "aes,avx,avx2,bmi1,bmi2,fma,fxsr,pclmulqdq,popcnt,rdrand,rdseed,sse,sse2,sse4.1,sse4.2,ssse3,xsave,xsavec,xsaveopt,xsaves"
-    )]
-    unsafe fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
+    fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
         use std::arch::x86_64::*;
 
-        // AVX2を使って高速化
-        let log_likelihoods = &env.obs.obs_log_likelihoods;
-        let mut offsets: &[u32] = &env.obs.obs_log_likelihoods_offsets;
-        let mut cnts: &[u32] = &self.counts_u32;
+        unsafe {
+            // AVX2を使って高速化
+            let log_likelihoods = &env.obs.obs_log_likelihoods;
+            let mut offsets: &[u32] = &env.obs.obs_log_likelihoods_offsets;
+            let mut cnts: &[u32] = &self.counts_u32;
 
-        let mut cnts_added: &[u32] =
-            &env.obs.relative_observation_cnt_u32[oil_i][Coord::try_from(shift).unwrap()];
-        let mut log_likelihood = _mm256_broadcast_ss(&0.0);
+            let mut cnts_added: &[u32] =
+                &env.obs.relative_observation_cnt_u32[oil_i][Coord::try_from(shift).unwrap()];
+            let mut log_likelihood = _mm256_broadcast_ss(&0.0);
 
-        const ELEMENTS_PER_256BIT: usize = 8;
+            const ELEMENTS_PER_256BIT: usize = 8;
 
-        while offsets.len() >= ELEMENTS_PER_256BIT {
-            // j番目の観測が保存されている箇所の先頭のindex
-            let offset = _mm256_loadu_si256(offsets.as_ptr() as *const __m256i);
+            while offsets.len() >= ELEMENTS_PER_256BIT {
+                // j番目の観測が保存されている箇所の先頭のindex
+                let offset = _mm256_loadu_si256(offsets.as_ptr() as *const __m256i);
 
-            // j番目の観測について、現在の配置だと仮定したときの真の埋蔵量
-            let cnt = _mm256_loadu_si256(cnts.as_ptr() as *const __m256i);
+                // j番目の観測について、現在の配置だと仮定したときの真の埋蔵量
+                let cnt = _mm256_loadu_si256(cnts.as_ptr() as *const __m256i);
 
-            // oil_iを追加したときの真の埋蔵量の増加量
-            let cnt_added = _mm256_loadu_si256(cnts_added.as_ptr() as *const __m256i);
+                // oil_iを追加したときの真の埋蔵量の増加量
+                let cnt_added = _mm256_loadu_si256(cnts_added.as_ptr() as *const __m256i);
 
-            // offset, cnt, cnt_addedを足す
-            let offset = _mm256_add_epi32(offset, cnt);
-            let offset = _mm256_add_epi32(offset, cnt_added);
+                // offset, cnt, cnt_addedを足す
+                let offset = _mm256_add_epi32(offset, cnt);
+                let offset = _mm256_add_epi32(offset, cnt_added);
 
-            // log_likelihoodsからoffsetの位置にある値を取得
-            let likelihoods = _mm256_i32gather_ps::<4>(log_likelihoods.as_ptr(), offset);
+                // log_likelihoodsからoffsetの位置にある値を取得
+                let likelihoods = _mm256_i32gather_ps::<4>(log_likelihoods.as_ptr(), offset);
 
-            // 取得した値をlog_likelihoodに足す
-            log_likelihood = _mm256_add_ps(log_likelihood, likelihoods);
+                // 取得した値をlog_likelihoodに足す
+                log_likelihood = _mm256_add_ps(log_likelihood, likelihoods);
 
-            // ポインタを進める（float型は256bitレジスタに8個入る）
-            offsets = offsets.get_unchecked(ELEMENTS_PER_256BIT..);
-            cnts = cnts.get_unchecked(ELEMENTS_PER_256BIT..);
-            cnts_added = cnts_added.get_unchecked(ELEMENTS_PER_256BIT..);
+                // ポインタを進める（float型は256bitレジスタに8個入る）
+                offsets = offsets.get_unchecked(ELEMENTS_PER_256BIT..);
+                cnts = cnts.get_unchecked(ELEMENTS_PER_256BIT..);
+                cnts_added = cnts_added.get_unchecked(ELEMENTS_PER_256BIT..);
+            }
+
+            // 水平加算
+            // https://www.kaede-software.com/2014/04/post_641.html
+            let sum = log_likelihood;
+            let sum = _mm256_hadd_ps(sum, sum);
+            let sum = _mm256_hadd_ps(sum, sum);
+            let rsum = _mm256_permute2f128_ps::<1>(sum, sum);
+            let sum = _mm256_unpacklo_ps(sum, rsum);
+            let sum = _mm256_hadd_ps(sum, sum);
+
+            // 足し合わせた値を変数に書き出し（_mm_store_ss系で単一の値の格納方法が分からんので一旦配列に書き出し……）
+            let mut buffer = [0.0; ELEMENTS_PER_256BIT];
+            _mm256_storeu_ps(buffer.as_mut_ptr(), sum);
+            let mut log_likelihood = buffer[0];
+
+            // 余りを処理
+            for (&offset, &cnt, &cnt_added) in izip!(offsets, cnts, cnts_added) {
+                let index = offset + cnt + cnt_added;
+                log_likelihood += log_likelihoods[index as usize];
+            }
+
+            log_likelihood as f64
         }
-
-        // TODO: 水平加算を理解する
-        let mut buffer = [0.0; ELEMENTS_PER_256BIT];
-        _mm256_storeu_ps(buffer.as_mut_ptr(), log_likelihood);
-        let mut log_likelihood = 0.0;
-
-        for &v in buffer.iter() {
-            log_likelihood += v;
-        }
-
-        for (&offset, &cnt, &cnt_added) in izip!(offsets, cnts, cnts_added) {
-            let index = offset + cnt + cnt_added;
-            log_likelihood += log_likelihoods[index as usize];
-        }
-
-        log_likelihood as f64
     }
 
     pub(super) fn add_last_observation(&mut self, env: &Env) {
@@ -222,7 +227,7 @@ impl State {
                     continue;
                 }
 
-                let log_likelihood = unsafe { self.add_oil_whatif(env, oil_i, shift) };
+                let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
                 shifts.push(shift);
                 log_likelihoods.push(log_likelihood);
                 max_log_likelihood.change_max(log_likelihood);
