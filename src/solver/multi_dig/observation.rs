@@ -106,6 +106,10 @@ impl ObservationManager {
             let mut overlap_min = usize::MAX;
             let mut overlap_max = usize::MIN;
 
+            let relative_observation_indices = &mut self.relative_observation_indices[oil_i];
+            let relative_observation_cnt = &mut self.relative_observation_cnt[oil_i];
+            let relative_observation_cnt_u32 = &mut self.relative_observation_cnt_u32[oil_i];
+
             for row in 0..=input.map_size - oil.height {
                 for col in 0..=input.map_size - oil.width {
                     let c = Coord::new(row, col);
@@ -123,9 +127,9 @@ impl ObservationManager {
                     overlap[c] = count;
                     overlap_min.change_min(count);
                     overlap_max.change_max(count);
-                    self.relative_observation_indices[oil_i][c].push(obs_id);
-                    self.relative_observation_cnt[oil_i][c].push(count);
-                    self.relative_observation_cnt_u32[oil_i][c].push(count as u32);
+                    relative_observation_indices[c].push(obs_id);
+                    relative_observation_cnt[c].push(count);
+                    relative_observation_cnt_u32[c].push(count as u32);
                     inv_relative_observation_indices.push((oil_i, count, shift));
                 }
             }
@@ -156,6 +160,52 @@ impl ObservationManager {
         let overlap_probs = Self::dp_overlap(input, &self.overlaps[obs_id]);
 
         // 候補をアップデート
+        unsafe {
+            self.update_shift_candidates(input, overlap_probs, obs_id);
+        }
+    }
+
+    fn dp_overlap(input: &Input, overlaps: &[Map2d<usize>]) -> Vec<Vec<f64>> {
+        // 重なる個数をメモしておく
+        let mut overlap_probs = vec![];
+
+        for (oil_i, oil) in input.oils.iter().enumerate() {
+            let mut overlap_vec = vec![];
+            let mut max_overlap = 0;
+
+            for row in 0..=input.map_size - oil.height {
+                for col in 0..=input.map_size - oil.width {
+                    let c = Coord::new(row, col);
+                    overlap_vec.push(overlaps[oil_i][c]);
+                    max_overlap.change_max(overlaps[oil_i][c]);
+                }
+            }
+
+            let candidate_count = overlap_vec.len();
+            let max_overlap = overlap_vec.iter().copied().max().unwrap();
+            let mut overlap_prob = vec![0.0; max_overlap + 1];
+
+            for &v in overlap_vec.iter() {
+                overlap_prob[v] += 1.0 / candidate_count as f64;
+            }
+
+            overlap_probs.push(overlap_prob);
+        }
+
+        let (prefix_dp, suffix_dp) = pre_dp(overlap_probs);
+        let dp = main_dp(input, &prefix_dp, &suffix_dp);
+
+        dp
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    #[inline(never)]
+    unsafe fn update_shift_candidates(
+        &mut self,
+        input: &Input,
+        overlap_probs: Vec<Vec<f64>>,
+        obs_id: usize,
+    ) {
         let mut shift_candidates = vec![];
 
         for (oil_i, oil) in input.oils.iter().enumerate() {
@@ -169,16 +219,12 @@ impl ObservationManager {
                     let shift = CoordDiff::new(row as isize, col as isize);
                     let overlap = self.overlaps[obs_id][oil_i][c];
 
-                    let mut likelihood = 0.0;
-
                     let min = overlap + other_min;
                     let max = overlap + other_max;
                     let p0 = &overlap_probs[oil_i][other_min..=other_max];
                     let p1 = &self.observations[obs_id].likelihoods[min..=max];
 
-                    for (p0, p1) in p0.iter().zip(p1) {
-                        likelihood += p0 * p1;
-                    }
+                    let likelihood = mul_likelihood(p0, p1);
 
                     self.shift_log_likelihoods[oil_i][c] += likelihood.ln();
 
@@ -212,85 +258,100 @@ impl ObservationManager {
 
         self.shift_candidates = shift_candidates;
     }
+}
 
-    fn dp_overlap(input: &Input, overlaps: &[Map2d<usize>]) -> Vec<Vec<f64>> {
-        // 重なる個数をメモしておく
-        let mut overlap_probs = vec![];
+#[target_feature(enable = "avx,avx2")]
+#[inline(never)]
+unsafe fn mul_likelihood(mut p0: &[f64], mut p1: &[f64]) -> f64 {
+    use std::arch::x86_64::*;
+    const ELEMENTS_PER_256BIT: usize = 4;
+    let mut sum = _mm256_broadcast_sd(&0.0);
 
-        for (oil_i, oil) in input.oils.iter().enumerate() {
-            let mut overlap_vec = vec![];
-            let mut max_overlap = 0;
+    while p0.len() >= ELEMENTS_PER_256BIT {
+        // 積をAVXを用いて計算する
+        // メモリからデータを読み込み
+        let pp0 = _mm256_loadu_pd(p0.as_ptr());
+        let pp1 = _mm256_loadu_pd(p1.as_ptr());
 
-            for row in 0..=input.map_size - oil.height {
-                for col in 0..=input.map_size - oil.width {
-                    let c = Coord::new(row, col);
-                    overlap_vec.push(overlaps[oil_i][c]);
-                    max_overlap.change_max(overlaps[oil_i][c]);
-                }
-            }
+        // -pp * (p_log2 - p_obs_log2) をする
+        // 符号を調整するため順番が逆になる
+        let mul = _mm256_mul_pd(pp0, pp1);
+        sum = _mm256_add_pd(sum, mul);
 
-            let candidate_count = overlap_vec.len();
-            let max_overlap = overlap_vec.iter().copied().max().unwrap();
-            let mut overlap_prob = vec![0.0; max_overlap + 1];
-
-            for &v in overlap_vec.iter() {
-                overlap_prob[v] += 1.0 / candidate_count as f64;
-            }
-
-            overlap_probs.push(overlap_prob);
-        }
-
-        let mut prefix_dp = vec![vec![1.0]];
-
-        for overlap_prob in overlap_probs.iter() {
-            let pre_dp = prefix_dp.last().unwrap();
-            let mut next_dp = vec![0.0; pre_dp.len() + overlap_prob.len() - 1];
-
-            for j in 0..pre_dp.len() {
-                for k in 0..overlap_prob.len() {
-                    next_dp[j + k] += pre_dp[j] * overlap_prob[k];
-                }
-            }
-
-            prefix_dp.push(next_dp);
-        }
-
-        let mut suffix_dp = vec![vec![1.0]];
-
-        for overlap_prob in overlap_probs.iter().rev() {
-            let pre_dp = suffix_dp.last().unwrap();
-            let mut next_dp = vec![0.0; pre_dp.len() + overlap_prob.len() - 1];
-
-            for j in 0..pre_dp.len() {
-                for k in 0..overlap_prob.len() {
-                    next_dp[j + k] += pre_dp[j] * overlap_prob[k];
-                }
-            }
-
-            suffix_dp.push(next_dp);
-        }
-
-        suffix_dp.reverse();
-
-        let mut result = vec![];
-
-        for i in 0..input.oil_count {
-            let pre_dp = &prefix_dp[i];
-            let suf_dp = &suffix_dp[i + 1];
-
-            let mut dp = vec![0.0; pre_dp.len() + suf_dp.len() - 1];
-
-            for j in 0..pre_dp.len() {
-                for k in 0..suf_dp.len() {
-                    dp[j + k] += pre_dp[j] * suf_dp[k];
-                }
-            }
-
-            result.push(dp);
-        }
-
-        result
+        p0 = &p0[ELEMENTS_PER_256BIT..];
+        p1 = &p1[ELEMENTS_PER_256BIT..];
     }
+
+    let mut buffer = [0.0; ELEMENTS_PER_256BIT];
+    _mm256_storeu_pd(buffer.as_mut_ptr(), sum);
+
+    let mut sum = 0.0;
+
+    for &v in buffer.iter() {
+        sum += v;
+    }
+
+    for (p0, p1) in p0.iter().zip(p1) {
+        sum += p0 * p1;
+    }
+
+    sum
+}
+
+fn pre_dp(overlap_probs: Vec<Vec<f64>>) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    let mut prefix_dp = vec![vec![1.0]];
+
+    for overlap_prob in overlap_probs.iter() {
+        let pre_dp = prefix_dp.last().unwrap();
+        let mut next_dp = vec![0.0; pre_dp.len() + overlap_prob.len() - 1];
+
+        for j in 0..pre_dp.len() {
+            for k in 0..overlap_prob.len() {
+                next_dp[j + k] += pre_dp[j] * overlap_prob[k];
+            }
+        }
+
+        prefix_dp.push(next_dp);
+    }
+
+    let mut suffix_dp = vec![vec![1.0]];
+
+    for overlap_prob in overlap_probs.iter().rev() {
+        let pre_dp = suffix_dp.last().unwrap();
+        let mut next_dp = vec![0.0; pre_dp.len() + overlap_prob.len() - 1];
+
+        for j in 0..pre_dp.len() {
+            for k in 0..overlap_prob.len() {
+                next_dp[j + k] += pre_dp[j] * overlap_prob[k];
+            }
+        }
+
+        suffix_dp.push(next_dp);
+    }
+
+    suffix_dp.reverse();
+    (prefix_dp, suffix_dp)
+}
+
+fn main_dp(input: &Input, prefix_dp: &[Vec<f64>], suffix_dp: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let mut result = vec![];
+
+    for i in 0..input.oil_count {
+        let pre_dp = &prefix_dp[i];
+        let suf_dp = &suffix_dp[i + 1];
+
+        let mut dp = vec![0.0; pre_dp.len() + suf_dp.len() - 1];
+
+        for j in 0..pre_dp.len() {
+            for k in 0..suf_dp.len() {
+                dp[j + k] += pre_dp[j] * suf_dp[k];
+            }
+        }
+
+        result.push(dp);
+    }
+
+    result
 }
 
 #[derive(Debug, Clone)]
