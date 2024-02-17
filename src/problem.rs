@@ -116,6 +116,7 @@ pub struct Judge<'a> {
     color_buf: Vec<Map2d<f64>>,
     query_limit: usize,
     query_count: usize,
+    show_comment: bool,
 }
 
 #[allow(dead_code)]
@@ -123,6 +124,8 @@ impl<'a> Judge<'a> {
     pub fn new() -> Self {
         let source = LineSource::new(BufReader::new(io::stdin()));
         let writer = BufWriter::new(io::stdout().lock());
+        let show_comment = std::env::var("AHC030_SHOW_COMMENT").is_ok_and(|s| s == "1");
+
         Self {
             source,
             writer,
@@ -131,6 +134,7 @@ impl<'a> Judge<'a> {
             color_buf: vec![],
             query_limit: 0,
             query_count: 0,
+            show_comment,
         }
     }
 
@@ -257,6 +261,10 @@ impl<'a> Judge<'a> {
     }
 
     fn flush_comments(&mut self) {
+        if !self.show_comment {
+            return;
+        }
+
         for comment in &self.comment_buf {
             writeln!(self.writer, "# {}", comment).unwrap();
         }
