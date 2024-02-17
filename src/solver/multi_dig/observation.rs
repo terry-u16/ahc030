@@ -13,8 +13,11 @@ use crate::{
 #[derive(Debug, Clone)]
 pub(super) struct ObservationManager {
     pub observations: Vec<Observation>,
-    /// indices[oil_i][shift] := 影響する (obs_i, count) のVec
-    pub relative_observation_indices: Vec<Map2d<Vec<(usize, usize)>>>,
+    pub obs_log_likelihoods: Vec<Vec<f64>>,
+    /// indices[oil_i][shift] := 影響するobs_iのVec
+    pub relative_observation_indices: Vec<Map2d<Vec<usize>>>,
+    /// indices[oil_i][shift] := 影響するcountのVec
+    pub relative_observation_cnt: Vec<Map2d<Vec<usize>>>,
     /// indices[obs_i] := 影響する (oil_i, count, shift) のVec
     pub inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
     /// matrix[obs_i][oil_i][shift] := oil_iをshiftだけ動かした領域とobs_iの重なりの数
@@ -29,6 +32,9 @@ pub(super) struct ObservationManager {
 impl ObservationManager {
     pub(super) fn new(input: &Input) -> Self {
         let relative_observation_indices = (0..input.oil_count)
+            .map(|_| Map2d::new_with(vec![], input.map_size))
+            .collect();
+        let relative_observation_cnt = (0..input.oil_count)
             .map(|_| Map2d::new_with(vec![], input.map_size))
             .collect();
         let observations = vec![];
@@ -57,7 +63,9 @@ impl ObservationManager {
 
         Self {
             observations,
+            obs_log_likelihoods: vec![],
             relative_observation_indices,
+            relative_observation_cnt,
             inv_relative_observation_indices,
             overlaps,
             shift_candidates,
@@ -68,6 +76,8 @@ impl ObservationManager {
 
     pub(super) fn add_observation(&mut self, input: &Input, observation: Observation) {
         let obs_id = self.observations.len();
+        self.obs_log_likelihoods
+            .push(observation.log_likelihoods.clone());
 
         // 観測による条件式の更新
         let mut observed_map = Map2d::new_with(false, input.map_size);
@@ -103,11 +113,9 @@ impl ObservationManager {
                     overlap[c] = count;
                     overlap_min.change_min(count);
                     overlap_max.change_max(count);
-
-                    if count > 0 {
-                        self.relative_observation_indices[oil_i][c].push((obs_id, count));
-                        inv_relative_observation_indices.push((oil_i, count, shift));
-                    }
+                    self.relative_observation_indices[oil_i][c].push(obs_id);
+                    self.relative_observation_cnt[oil_i][c].push(count);
+                    inv_relative_observation_indices.push((oil_i, count, shift));
                 }
             }
 

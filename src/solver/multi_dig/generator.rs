@@ -56,10 +56,10 @@ impl State {
 
     fn add_oil(&mut self, env: &Env, oil_i: usize, shift: CoordDiff) {
         self.shift[oil_i] = shift;
-        let indices = &env.obs.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
+        let cnt = &env.obs.relative_observation_cnt[oil_i][Coord::try_from(shift).unwrap()];
         self.hash ^= env.input.hashes[oil_i][Coord::try_from(shift).unwrap()];
 
-        for &(obs_i, cnt) in indices {
+        for (obs_i, &cnt) in cnt.iter().enumerate() {
             let observation = &env.obs.observations[obs_i];
             let count = &mut self.counts[obs_i];
             self.log_likelihood -= observation.log_likelihoods[*count];
@@ -70,10 +70,10 @@ impl State {
 
     fn remove_oil(&mut self, env: &Env, oil_i: usize) {
         let shift = self.shift[oil_i];
-        let indices = &env.obs.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
+        let cnt = &env.obs.relative_observation_cnt[oil_i][Coord::try_from(shift).unwrap()];
         self.hash ^= env.input.hashes[oil_i][Coord::try_from(shift).unwrap()];
 
-        for &(obs_i, cnt) in indices.iter() {
+        for (obs_i, &cnt) in cnt.iter().enumerate() {
             let observation = &env.obs.observations[obs_i];
             let count = &mut self.counts[obs_i];
             self.log_likelihood -= observation.log_likelihoods[*count];
@@ -82,16 +82,20 @@ impl State {
         }
     }
 
-    fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
-        let indices = &env.obs.relative_observation_indices[oil_i][Coord::try_from(shift).unwrap()];
-        let mut log_likelihood = self.log_likelihood;
+    #[target_feature(
+        enable = "aes,avx,avx2,bmi1,bmi2,fma,fxsr,pclmulqdq,popcnt,rdrand,rdseed,sse,sse2,sse4.1,sse4.2,ssse3,xsave,xsavec,xsaveopt,xsaves"
+    )]
+    unsafe fn add_oil_whatif(&self, env: &Env, oil_i: usize, shift: CoordDiff) -> f64 {
+        let cnt = &env.obs.relative_observation_cnt[oil_i][Coord::try_from(shift).unwrap()];
+        let mut log_likelihood = 0.0;
 
-        for &(obs_i, cnt) in indices {
-            let observation = &env.obs.observations[obs_i];
-            let mut count = self.counts[obs_i];
-            log_likelihood -= observation.log_likelihoods[count];
-            count += cnt;
-            log_likelihood += observation.log_likelihoods[count];
+        for (observation, (&count, &cnt)) in env
+            .obs
+            .obs_log_likelihoods
+            .iter()
+            .zip(self.counts.iter().zip(cnt.iter()))
+        {
+            log_likelihood += unsafe { observation.get_unchecked(count + cnt) };
         }
 
         log_likelihood
@@ -171,7 +175,7 @@ impl State {
                     continue;
                 }
 
-                let log_likelihood = self.add_oil_whatif(env, oil_i, shift);
+                let log_likelihood = unsafe { self.add_oil_whatif(env, oil_i, shift) };
                 shifts.push(shift);
                 log_likelihoods.push(log_likelihood);
                 max_log_likelihood.change_max(log_likelihood);
