@@ -1,4 +1,5 @@
 use itertools::Itertools as _;
+use ordered_float::OrderedFloat;
 use rand::{seq::SliceRandom as _, Rng};
 use rand_core::SeedableRng as _;
 use rand_distr::{Distribution as _, WeightedAliasIndex};
@@ -30,43 +31,37 @@ impl<'a> Solver for SingleDigSolver<'a> {
 
         let each_duration = 2.0 / (input.map_size * input.map_size) as f64;
         let mut next_pos = None;
+        let mut states = vec![State::new(
+            vec![CoordDiff::new(0, 0); input.oil_count],
+            env.map.clone(),
+            &env,
+        )];
 
         for turn in 0..input.map_size * input.map_size {
-            let state = State::new(
-                vec![CoordDiff::new(0, 0); input.oil_count],
-                env.map.clone(),
-                input,
-            );
+            states = generate_states(&env, states, each_duration, &mut rng);
+            let candidates_len = states.len();
 
-            let state = state.neigh(&env, &mut rng, input.oil_count);
+            states.sort_unstable();
+            states.dedup();
 
-            let solutions = climbing(&env, state, each_duration);
-            let candidates_len = solutions.len();
-            eprintln!("turn: {}, solutions: {}", turn, candidates_len);
+            let min_violation = states.iter().map(|s| s.violations).min().unwrap();
+            states.retain(|s| s.violations == min_violation);
+            eprintln!("turn: {}, states: {}", turn, candidates_len);
 
-            let solutions = solutions.into_iter().collect_vec();
-            color_map(
-                &solutions,
-                &mut rng,
-                &env,
-                input,
-                candidates_len,
-                &mut self.judge,
-            );
+            color_map(&states, &mut rng, &env, &mut self.judge);
 
-            if candidates_len == 1 {
-                let solution = solutions.iter().next().unwrap();
-                let solution = State::new(solution.clone(), env.map.clone(), input);
+            if states.len() == 1 {
+                let states = states.iter().next().unwrap();
 
-                if solution.calc_score() == 0 {
-                    let answer = solution.to_answer(input);
+                if states.calc_score() == 0 {
+                    let answer = states.to_answer(input);
 
                     if self.judge.answer(&answer).is_ok() {
                         return;
                     }
                 }
-            } else if solutions.len() >= 2 {
-                next_pos = choose_next_pos(solutions, &mut rng, input, &env, &mut self.judge);
+            } else if states.len() >= 2 {
+                next_pos = choose_next_pos(&states, &mut rng, input, &env, &mut self.judge);
             }
 
             let coord = next_pos.take().unwrap_or_else(|| loop {
@@ -81,6 +76,13 @@ impl<'a> Solver for SingleDigSolver<'a> {
 
             let observation = self.judge.query_single(coord);
             env.add_observation(coord, observation);
+
+            for s in states.iter_mut() {
+                s.add_observation(&env, coord, observation);
+            }
+
+            let min_violation = states.iter().map(|s| s.violations).min().unwrap();
+            states.retain(|s| s.violations == min_violation);
         }
 
         let mut answer = vec![];
@@ -100,7 +102,7 @@ impl<'a> Solver for SingleDigSolver<'a> {
 }
 
 fn choose_next_pos(
-    solutions: Vec<Vec<CoordDiff>>,
+    solutions: &[State],
     rng: &mut rand_pcg::Mcg128Xsl64,
     input: &Input,
     env: &Env<'_>,
@@ -108,12 +110,12 @@ fn choose_next_pos(
 ) -> Option<Coord> {
     let mut maps = vec![];
     let sample_count = 200.min(solutions.len());
-    let solutions = solutions.choose_multiple(rng, sample_count);
+    let states = solutions.choose_multiple(rng, sample_count);
 
-    for shifts in solutions {
+    for state in states {
         let mut map = Map2d::new_with(0, input.map_size);
 
-        for (&shift, oil) in shifts.iter().zip(input.oils.iter()) {
+        for (&shift, oil) in state.shift.iter().zip(input.oils.iter()) {
             for &p in oil.pos.iter() {
                 let p = p + shift;
 
@@ -181,26 +183,18 @@ fn choose_next_pos(
     c
 }
 
-fn color_map(
-    solutions: &Vec<Vec<CoordDiff>>,
-    rng: &mut rand_pcg::Mcg128Xsl64,
-    env: &Env<'_>,
-    input: &Input,
-    candidates_len: usize,
-    judge: &mut Judge,
-) {
-    let solution = solutions.choose(rng).unwrap().clone();
-    let solution = State::new(solution.clone(), env.map.clone(), input);
-    let mut colors = Map2d::new_with(0.0, input.map_size);
+fn color_map(states: &[State], rng: &mut rand_pcg::Mcg128Xsl64, env: &Env<'_>, judge: &mut Judge) {
+    let state = states.choose(rng).unwrap().clone();
+    let mut colors = Map2d::new_with(0.0, env.input.map_size);
 
-    for &c in solution.to_answer(input).iter() {
-        colors[c] = 1.0 / candidates_len as f64;
+    for &c in state.to_answer(env.input).iter() {
+        colors[c] = 1.0 / states.len() as f64;
     }
 
     judge.comment(&format!(
         "score: {}, remaining: {}",
-        solution.calc_score(),
-        candidates_len
+        state.calc_score(),
+        states.len()
     ));
     judge.comment_colors(&colors);
 }
@@ -270,8 +264,8 @@ struct State {
 }
 
 impl State {
-    fn new(shift: Vec<CoordDiff>, mut map: Map2d<Option<i32>>, input: &Input) -> Self {
-        for (oil, &shift) in input.oils.iter().zip(shift.iter()) {
+    fn new(shift: Vec<CoordDiff>, mut map: Map2d<Option<i32>>, env: &Env) -> Self {
+        for (oil, &shift) in env.input.oils.iter().zip(shift.iter()) {
             for &p in oil.pos.iter() {
                 let pos = p + shift;
 
@@ -291,7 +285,7 @@ impl State {
 
         let mut hash = 0;
 
-        for (&shift, h) in shift.iter().zip(input.hashes.iter()) {
+        for (&shift, h) in shift.iter().zip(env.input.hashes.iter()) {
             hash ^= h[Coord::try_from(shift).unwrap()];
         }
 
@@ -302,7 +296,7 @@ impl State {
             hash,
         };
 
-        state.normalize(input);
+        state.normalize(&env);
         state
     }
 
@@ -317,7 +311,7 @@ impl State {
                     continue;
                 }
 
-                let v = &mut self.map[p].unwrap();
+                let v = self.map[p].as_mut().unwrap();
 
                 *v -= 1;
             }
@@ -366,7 +360,7 @@ impl State {
             self.add_oil(env, oil_i, best_shift);
         }
 
-        self.normalize(&env.input);
+        self.normalize(&env);
 
         self
     }
@@ -434,22 +428,34 @@ impl State {
         violation
     }
 
-    fn normalize(&mut self, input: &Input) {
+    fn normalize(&mut self, env: &Env) {
         let mut groups = FxHashMap::default();
 
-        for (i, (oil, shift)) in input.oils.iter().zip(&self.shift).enumerate() {
+        for (i, (oil, shift)) in env
+            .input
+            .oils
+            .iter()
+            .zip(self.shift.iter().copied())
+            .enumerate()
+        {
             let entry = groups.entry(&oil.pos).or_insert_with(|| vec![]);
             entry.push((i, shift));
         }
 
-        let mut new_shift = vec![CoordDiff::new(0, 0); input.oil_count];
+        let mut new_shift = vec![CoordDiff::new(0, 0); env.input.oil_count];
 
         for group in groups.values() {
+            for &(i, shift) in group {
+                self.hash ^= env.input.hashes[i][Coord::try_from(shift).unwrap()];
+            }
+
             let mut shifts = group.iter().map(|&(_, shift)| shift).collect_vec();
+
             shifts.sort_unstable();
 
-            for (i, shift) in group.iter().map(|&(i, _)| i).zip(shifts) {
-                new_shift[i] = *shift;
+            for (i, &shift) in group.iter().map(|&(i, _)| i).zip(shifts.iter()) {
+                self.hash ^= env.input.hashes[i][Coord::try_from(shift).unwrap()];
+                new_shift[i] = shift;
             }
         }
 
@@ -487,14 +493,52 @@ impl State {
     }
 }
 
-fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<CoordDiff>> {
-    let mut solution = initial_solution;
-    let mut best_solutions = FxHashSet::default();
-    let mut current_score = solution.calc_score();
-    let mut best_score = current_score;
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl Eq for State {}
+
+impl std::hash::Hash for State {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.hash.partial_cmp(&other.hash)
+    }
+}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.hash.cmp(&other.hash)
+    }
+}
+
+fn generate_states(
+    env: &Env,
+    mut states: Vec<State>,
+    duration: f64,
+    rng: &mut impl Rng,
+) -> Vec<State> {
+    let mut hashes = FxHashSet::default();
+
+    for state in states.iter() {
+        hashes.insert(state.hash);
+    }
+
+    let mut prefix_prob = vec![OrderedFloat(prob(&states[0]))];
+
+    for i in 1..states.len() {
+        let p = OrderedFloat(prob(&states[i]) + prefix_prob[i - 1].0);
+        prefix_prob.push(p);
+    }
 
     let mut all_iter = 0;
-    let mut rng = rand_pcg::Pcg64Mcg::new(42);
 
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
@@ -512,25 +556,25 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
         }
 
         // 変形
-        let oil_count = (oil_count_dist.sample(&mut rng)).min(env.input.oil_count);
-        let new_solution = solution.clone().neigh(env, &mut rng, oil_count);
+        let x = rng.gen_range(0.0..prefix_prob.last().unwrap().0);
+        let index = prefix_prob
+            .binary_search(&OrderedFloat(x))
+            .unwrap_or_else(|x| x);
+        let state = states[index].clone();
 
-        // スコア計算
-        let new_score = new_solution.calc_score();
-        let score_diff = new_score - current_score;
+        let oil_count = (oil_count_dist.sample(rng)).min(env.input.oil_count);
+        let new_state = state.neigh(env, rng, oil_count);
 
-        if score_diff <= 0 {
-            // 解の更新
-            current_score = new_score;
-            solution = new_solution;
-
-            if best_score.change_min(current_score) {
-                best_solutions.clear();
-            }
-
-            best_solutions.insert(solution.shift.clone());
+        if hashes.insert(new_state.hash) {
+            let p = prob(&new_state) + prefix_prob.last().unwrap().0;
+            prefix_prob.push(OrderedFloat(p));
+            states.push(new_state);
         }
     }
 
-    best_solutions
+    states
+}
+
+fn prob(state: &State) -> f64 {
+    2.0f64.powi(-state.violations)
 }
