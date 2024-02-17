@@ -37,7 +37,8 @@ impl<'a> Solver for SingleDigSolver<'a> {
                 env.map.clone(),
                 input,
             );
-            let state = state.neigh(input, &mut rng, input.oil_count);
+
+            let state = state.neigh(&env, &mut rng, input.oil_count);
 
             let solutions = climbing(&env, state, each_duration);
             let candidates_len = solutions.len();
@@ -78,7 +79,8 @@ impl<'a> Solver for SingleDigSolver<'a> {
                 }
             });
 
-            env.map[coord] = Some(self.judge.query_single(coord));
+            let observation = self.judge.query_single(coord);
+            env.add_observation(coord, observation);
         }
 
         let mut answer = vec![];
@@ -207,13 +209,55 @@ fn color_map(
 struct Env<'a> {
     input: &'a Input,
     map: Map2d<Option<i32>>,
+    shift_candidates: Vec<Vec<CoordDiff>>,
 }
 
 impl<'a> Env<'a> {
     fn new(input: &'a Input) -> Self {
         let map = Map2d::new_with(None, input.map_size);
+        let shift_candidates = input
+            .oils
+            .iter()
+            .map(|oil| {
+                let mut cands = vec![];
 
-        Self { input, map }
+                for row in 0..=input.map_size - oil.height {
+                    for col in 0..=input.map_size - oil.width {
+                        cands.push(CoordDiff::new(row as isize, col as isize));
+                    }
+                }
+
+                cands
+            })
+            .collect_vec();
+
+        Self {
+            input,
+            map,
+            shift_candidates,
+        }
+    }
+
+    fn add_observation(&mut self, pos: Coord, value: i32) {
+        self.map[pos] = Some(value);
+
+        for (oil, cand) in self.input.oils.iter().zip(self.shift_candidates.iter_mut()) {
+            if value == 0 {
+                cand.retain(|&shift| {
+                    oil.pos.iter().all(|&p| {
+                        let p = p + shift;
+                        p != pos
+                    })
+                });
+            } else if value == self.input.oil_count as i32 {
+                cand.retain(|&shift| {
+                    oil.pos.iter().any(|&p| {
+                        let p = p + shift;
+                        p == pos
+                    })
+                });
+            }
+        }
     }
 }
 
@@ -254,12 +298,12 @@ impl State {
         state
     }
 
-    fn neigh(&self, input: &Input, rng: &mut impl Rng, choose_cnt: usize) -> Self {
+    fn neigh(&self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
         let mut oil_indices = vec![];
 
         for _ in 0..choose_cnt {
             let oil = loop {
-                let oil = rng.gen_range(0..input.oil_count);
+                let oil = rng.gen_range(0..env.input.oil_count);
 
                 if !oil_indices.contains(&oil) {
                     break oil;
@@ -274,7 +318,7 @@ impl State {
         for &oil in &oil_indices {
             let shift = state.shift[oil];
 
-            for &p in input.oils[oil].pos.iter() {
+            for &p in env.input.oils[oil].pos.iter() {
                 let p = p + shift;
 
                 let Some(v) = &mut state.map[p] else {
@@ -292,37 +336,33 @@ impl State {
         }
 
         for &oil_i in &oil_indices {
-            let oil = &input.oils[oil_i];
+            let oil = &env.input.oils[oil_i];
             let mut best_violation = i32::MAX;
             let mut best_shifts = vec![];
 
-            for row in 0..=input.map_size - oil.height {
-                for col in 0..=input.map_size - oil.width {
-                    let shift = CoordDiff::new(row as isize, col as isize);
+            for &shift in env.shift_candidates[oil_i].iter() {
+                let mut violation = 0;
 
-                    let mut violation = 0;
+                for &p in oil.pos.iter() {
+                    let p = p + shift;
 
-                    for &p in oil.pos.iter() {
-                        let p = p + shift;
+                    let Some(v) = &mut state.map[p] else {
+                        continue;
+                    };
 
-                        let Some(v) = &mut state.map[p] else {
-                            continue;
-                        };
-
-                        if *v > 0 {
-                            violation -= 1;
-                        } else {
-                            violation += 1;
-                        }
+                    if *v > 0 {
+                        violation -= 1;
+                    } else {
+                        violation += 1;
                     }
+                }
 
-                    if best_violation.change_min(violation) {
-                        best_shifts.clear();
-                    }
+                if best_violation.change_min(violation) {
+                    best_shifts.clear();
+                }
 
-                    if violation == best_violation {
-                        best_shifts.push(shift);
-                    }
+                if violation == best_violation {
+                    best_shifts.push(shift);
                 }
             }
 
@@ -342,7 +382,7 @@ impl State {
             state.violations += best_violation;
         }
 
-        state.normalize(input);
+        state.normalize(&env.input);
 
         state
     }
@@ -429,7 +469,7 @@ fn climbing(env: &Env, initial_solution: State, duration: f64) -> FxHashSet<Vec<
 
         // 変形
         let oil_count = (oil_count_dist.sample(&mut rng) + 1).min(env.input.oil_count);
-        let new_solution = solution.neigh(&env.input, &mut rng, oil_count);
+        let new_solution = solution.neigh(env, &mut rng, oil_count);
 
         // スコア計算
         let new_score = new_solution.calc_score();
