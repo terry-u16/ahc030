@@ -82,14 +82,14 @@ pub(super) fn select_sample_points(
 }
 
 pub(super) struct ProbTable {
-    prob: Vec<Vec<Vec<f64>>>,
-    prob_log: Vec<Vec<Vec<f64>>>,
+    prob: Vec<Vec<Vec<f32>>>,
+    prob_log: Vec<Vec<Vec<f32>>>,
     targets: Vec<Vec<Range<usize>>>,
 }
 
 impl ProbTable {
-    const MIN_PROB: f64 = f64::MIN_POSITIVE;
-    const MIN_PROB_LN: f64 = f64::MIN;
+    const MIN_PROB: f32 = f32::MIN_POSITIVE;
+    const MIN_PROB_LN: f32 = f32::MIN;
 
     pub(super) fn new(input: &Input) -> Self {
         let sq_cnt = input.map_size * input.map_size;
@@ -121,7 +121,7 @@ impl ProbTable {
         input: &Input,
         sq_cnt: usize,
         true_cnt: usize,
-    ) -> (&[f64], &[f64], Range<usize>) {
+    ) -> (&[f32], &[f32], Range<usize>) {
         assert!(sq_cnt > 0);
 
         if self.targets[sq_cnt][true_cnt] == Range::default() {
@@ -159,14 +159,15 @@ impl ProbTable {
         let std_dev = varinace.sqrt();
         let gauss = GaussianDistribution::new(mean, std_dev);
 
-        let f = |v: usize| -> f64 {
-            if v == 0 {
+        let f = |v: usize| -> f32 {
+            let p = if v == 0 {
                 gauss.calc_cumulative_dist(0.5)
             } else {
                 gauss.calc_cumulative_dist(v as f64 + 0.5)
                     - gauss.calc_cumulative_dist(v as f64 - 0.5)
-            }
-            .max(Self::MIN_PROB)
+            } as f32;
+
+            p.max(Self::MIN_PROB)
         };
 
         let p = f(true_cnt);
@@ -225,9 +226,9 @@ struct Env<'a> {
     input: &'a Input,
     states: Vec<generator::State>,
     state_maps: Vec<Map2d<usize>>,
-    probs: Vec<f64>,
-    probs_log2: Vec<f64>,
-    base_entropy: f64,
+    probs: Vec<f32>,
+    probs_log2: Vec<f32>,
+    base_entropy: f32,
     max_sample_count: usize,
 }
 
@@ -279,10 +280,7 @@ impl<'a> Env<'a> {
 
         // 確率計算をやり直し
         let sum_probs = probs.iter().sum::<f64>();
-
-        for p in probs.iter_mut() {
-            *p /= sum_probs;
-        }
+        let probs = probs.iter().map(|&p| (p / sum_probs) as f32).collect_vec();
 
         let probs_log2 = probs.iter().map(|&p| p.log2()).collect_vec();
 
@@ -324,16 +322,16 @@ impl<'a> Env<'a> {
 struct State {
     map: Map2d<bool>,
     selected_count: usize,
-    conditional_entropy: Option<f64>,
+    conditional_entropy: Option<f32>,
     selected: IndexSet,
     not_selected: IndexSet,
     overlap_counts: Vec<usize>,
 }
 
 static mut STATIC_INIT: bool = false;
-static mut P_OBS: Vec<f64> = vec![];
-static mut P_OIL_OBS: Vec<Vec<f64>> = vec![];
-static mut P_LOG2_OIL_OBS: Vec<Vec<f64>> = vec![];
+static mut P_OBS: Vec<f32> = vec![];
+static mut P_OIL_OBS: Vec<Vec<f32>> = vec![];
+static mut P_LOG2_OIL_OBS: Vec<Vec<f32>> = vec![];
 static mut P_OIL_OBS_RANGES: Vec<Range<usize>> = vec![];
 
 impl State {
@@ -462,13 +460,13 @@ impl State {
     #[target_feature(
         enable = "aes,avx,avx2,bmi1,bmi2,fma,fxsr,pclmulqdq,popcnt,rdrand,rdseed,sse,sse2,sse4.1,sse4.2,ssse3,xsave,xsavec,xsaveopt,xsaves"
     )]
-    unsafe fn calc_conditional_entropy(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
+    unsafe fn calc_conditional_entropy(&mut self, env: &Env, prob_table: &mut ProbTable) -> f32 {
         if let Some(entropy) = self.conditional_entropy {
             return entropy;
         };
 
         if !STATIC_INIT {
-            P_OBS.resize(1000, f64::MIN_POSITIVE);
+            P_OBS.resize(1000, f32::MIN_POSITIVE);
             P_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
             P_LOG2_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
             STATIC_INIT = true;
@@ -483,7 +481,7 @@ impl State {
         }
 
         let p_obs = &mut P_OBS[0..max_obs_v];
-        p_obs.fill(f64::MIN_POSITIVE);
+        p_obs.fill(f32::MIN_POSITIVE);
         let p_oil_obs = &mut P_OIL_OBS;
         let p_log2_oil_obs = &mut P_LOG2_OIL_OBS;
         let p_oil_obs_ranges = &mut P_OIL_OBS_RANGES;
@@ -510,8 +508,8 @@ impl State {
         }
 
         for p in p_obs.iter_mut() {
-            if *p == f64::MIN_POSITIVE {
-                *p = f64::MIN;
+            if *p == f32::MIN_POSITIVE {
+                *p = f32::MIN;
             } else {
                 *p = p.log2();
             }
@@ -526,7 +524,7 @@ impl State {
     }
 
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn add_p(p_obs: &mut [f64], p_oil_obs: &mut [f64], prob: &[f64], state_prob: f64) {
+    unsafe fn add_p(p_obs: &mut [f32], p_oil_obs: &mut [f32], prob: &[f32], state_prob: f32) {
         for ((p_obs, p_oil_obs), &prob) in
             p_obs.iter_mut().zip(p_oil_obs.iter_mut()).zip(prob.iter())
         {
@@ -539,7 +537,7 @@ impl State {
     }
 
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn add_p_log(p_log2_oil_obs: &mut [f64], prob_log2: &[f64], state_prob_log2: f64) {
+    unsafe fn add_p_log(p_log2_oil_obs: &mut [f32], prob_log2: &[f32], state_prob_log2: f32) {
         for (p_log2_oil_obs, &prob_log2) in p_log2_oil_obs.iter_mut().zip(prob_log2.iter()) {
             // add_pのlog2版
             let p_log2 = prob_log2 + state_prob_log2;
@@ -549,11 +547,11 @@ impl State {
 
     #[target_feature(enable = "avx,avx2")]
     unsafe fn sum_entropy(
-        p_oil_obs: &[Vec<f64>],
-        p_log2_oil_obs: &[Vec<f64>],
-        p_obs_log2: &[f64],
+        p_oil_obs: &[Vec<f32>],
+        p_log2_oil_obs: &[Vec<f32>],
+        p_obs_log2: &[f32],
         p_oil_obs_ranges: &[Range<usize>],
-    ) -> f64 {
+    ) -> f32 {
         let mut entropy = 0.0;
 
         for (p_oil_obs, p_log2_oil_obs, range) in izip!(
@@ -577,10 +575,10 @@ impl State {
     /// スコア（= 相互情報量 / 調査コスト）を計算する
     ///
     /// スコアは大きいほどよい
-    fn calc_score(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
+    fn calc_score(&mut self, env: &Env, prob_table: &mut ProbTable) -> f32 {
         let mutual_information =
             env.base_entropy - unsafe { self.calc_conditional_entropy(env, prob_table) };
-        let score = mutual_information * (self.selected_count as f64).sqrt();
+        let score = mutual_information * (self.selected_count as f32).sqrt();
         score
     }
 }
