@@ -311,7 +311,7 @@ impl Observation {
     pub(super) fn new(pos: Vec<Coord>, sampled: i32, input: &Input) -> Self {
         assert!(pos.len() > 0);
 
-        let likelihoods_len = pos.len() * input.oil_count + 1;
+        let likelihoods_len = input.total_oil_tiles + 1;
         let k = pos.len() as f64;
         let x = sampled as f64;
 

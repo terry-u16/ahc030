@@ -20,6 +20,7 @@ pub struct Input {
     pub oil_count: usize,
     pub eps: f64,
     pub oils: Vec<Oils>,
+    pub total_oil_tiles: usize,
     pub hashes: Vec<Map2d<u64>>,
     pub duration_corrector: DurationCorrector,
 }
@@ -48,6 +49,7 @@ impl Input {
             hashes.push(map);
         }
 
+        let total_oil_tiles = oils.iter().map(|o| o.len).sum();
         let duration_corrector = DurationCorrector::from_env();
 
         Self {
@@ -55,6 +57,7 @@ impl Input {
             oil_count,
             eps,
             oils,
+            total_oil_tiles,
             hashes,
             duration_corrector,
         }
