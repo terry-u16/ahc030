@@ -459,70 +459,70 @@ impl State {
     }
 
     /// 条件付きエントロピーを計算する
-    #[target_feature(
-        enable = "aes,avx,avx2,bmi1,bmi2,fma,fxsr,pclmulqdq,popcnt,rdrand,rdseed,sse,sse2,sse4.1,sse4.2,ssse3,xsave,xsavec,xsaveopt,xsaves"
-    )]
-    unsafe fn calc_conditional_entropy(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
+    fn calc_conditional_entropy(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
         if let Some(entropy) = self.conditional_entropy {
             return entropy;
         };
 
-        if !STATIC_INIT {
-            P_OBS.resize(1000, f64::MIN_POSITIVE);
-            P_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
-            P_LOG2_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
-            STATIC_INIT = true;
-        }
-
-        // obs_vの最大値を取得する
-        let mut max_obs_v = 0;
-
-        for &count in self.overlap_counts.iter() {
-            let range = prob_table.range(&env.input, self.selected_count, count);
-            max_obs_v.change_max(range.end);
-        }
-
-        let p_obs = &mut P_OBS[0..max_obs_v];
-        p_obs.fill(f64::MIN_POSITIVE);
-        let p_oil_obs = &mut P_OIL_OBS;
-        let p_log2_oil_obs = &mut P_LOG2_OIL_OBS;
-        let p_oil_obs_ranges = &mut P_OIL_OBS_RANGES;
-        p_oil_obs_ranges.clear();
-
-        // 確率の表を作成する
-        for (counts, state_prob, state_prob_log2, p_oil_obs, p_log2_oil_obs) in izip!(
-            &self.overlap_counts,
-            &env.probs,
-            &env.probs_log2,
-            p_oil_obs.iter_mut(),
-            p_log2_oil_obs.iter_mut()
-        ) {
-            let (prob, prob_log2, range) =
-                prob_table.probs(&env.input, self.selected_count, *counts);
-
-            let p_oil_obs = &mut p_oil_obs[..range.end - range.start];
-            let p_log2_oil_obs = &mut p_log2_oil_obs[..range.end - range.start];
-            p_oil_obs_ranges.push(range.clone());
-            let p_obs = &mut p_obs[range];
-
-            Self::add_p(p_obs, p_oil_obs, prob, *state_prob);
-            Self::add_p_log(p_log2_oil_obs, prob_log2, *state_prob_log2);
-        }
-
-        for p in p_obs.iter_mut() {
-            if *p == f64::MIN_POSITIVE {
-                *p = f64::MIN;
-            } else {
-                *p = p.log2();
+        unsafe {
+            if !STATIC_INIT {
+                P_OBS.resize(1000, f64::MIN_POSITIVE);
+                P_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
+                P_LOG2_OIL_OBS.resize(env.states.len(), vec![0.0; 1000]);
+                STATIC_INIT = true;
             }
+
+            // obs_vの最大値を取得する
+            let mut max_obs_v = 0;
+
+            for &count in self.overlap_counts.iter() {
+                let range = prob_table.range(&env.input, self.selected_count, count);
+                max_obs_v.change_max(range.end);
+            }
+
+            let p_obs = &mut P_OBS[0..max_obs_v];
+            p_obs.fill(f64::MIN_POSITIVE);
+            let p_oil_obs = &mut P_OIL_OBS;
+            let p_log2_oil_obs = &mut P_LOG2_OIL_OBS;
+            let p_oil_obs_ranges = &mut P_OIL_OBS_RANGES;
+            p_oil_obs_ranges.clear();
+
+            // 確率の表を作成する
+            for (counts, state_prob, state_prob_log2, p_oil_obs, p_log2_oil_obs) in izip!(
+                &self.overlap_counts,
+                &env.probs,
+                &env.probs_log2,
+                p_oil_obs.iter_mut(),
+                p_log2_oil_obs.iter_mut()
+            ) {
+                let (prob, prob_log2, range) =
+                    prob_table.probs(&env.input, self.selected_count, *counts);
+
+                let p_oil_obs = &mut p_oil_obs[..range.end - range.start];
+                let p_log2_oil_obs = &mut p_log2_oil_obs[..range.end - range.start];
+                p_oil_obs_ranges.push(range.clone());
+                let p_obs = &mut p_obs[range];
+
+                Self::add_p(p_obs, p_oil_obs, prob, *state_prob);
+                Self::add_p_log(p_log2_oil_obs, prob_log2, *state_prob_log2);
+            }
+
+            for p in p_obs.iter_mut() {
+                if *p == f64::MIN_POSITIVE {
+                    *p = f64::MIN;
+                } else {
+                    *p = p.log2();
+                }
+            }
+
+            let p_obs_log2 = p_obs;
+
+            let entropy =
+                Self::sum_entropy(p_oil_obs, p_log2_oil_obs, p_obs_log2, p_oil_obs_ranges);
+
+            self.conditional_entropy = Some(entropy);
+            entropy
         }
-
-        let p_obs_log2 = p_obs;
-
-        let entropy = Self::sum_entropy(p_oil_obs, p_log2_oil_obs, p_obs_log2, p_oil_obs_ranges);
-
-        self.conditional_entropy = Some(entropy);
-        entropy
     }
 
     #[target_feature(enable = "avx,avx2")]
@@ -548,38 +548,79 @@ impl State {
     }
 
     #[target_feature(enable = "avx,avx2")]
+    #[inline(never)]
     unsafe fn sum_entropy(
         p_oil_obs: &[Vec<f64>],
         p_log2_oil_obs: &[Vec<f64>],
         p_obs_log2: &[f64],
         p_oil_obs_ranges: &[Range<usize>],
     ) -> f64 {
-        let mut entropy = 0.0;
+        unsafe {
+            use std::arch::x86_64::*;
 
-        for (p_oil_obs, p_log2_oil_obs, range) in izip!(
-            p_oil_obs.iter(),
-            p_log2_oil_obs.iter(),
-            p_oil_obs_ranges.iter()
-        ) {
-            let p_obs_log2 = &p_obs_log2[range.clone()];
+            let mut entropy256 = _mm256_broadcast_sd(&0.0);
+            let mut entropy = 0.0;
+            const ELEMENTS_PER_256BIT: usize = 4;
 
-            for (&pp, &p_log2, &p_obs_log2) in izip!(p_oil_obs, p_log2_oil_obs, p_obs_log2) {
-                // dH = -p(v_obs) * p(配置 | v_obs) * log(p(配置 | v_obs))
-                //    = -p(配置, v_obs) * log(p(配置, v_obs) / p(v_obs))
-                //    = -p(配置, v_obs) * (log(p(配置, v_obs)) - log(p(v_obs)))
-                entropy -= pp * (p_log2 - p_obs_log2);
+            for (p_oil_obs, p_log2_oil_obs, range) in izip!(
+                p_oil_obs.iter(),
+                p_log2_oil_obs.iter(),
+                p_oil_obs_ranges.iter()
+            ) {
+                let mut p_obs_log2: &[f64] = &p_obs_log2[range.clone()];
+
+                // p_oil_obs, p_log2_oil_obsは長めに取られているため、長さを揃える
+                // p_obs_log2と同じ長さまでしか要素は入っていない
+                let len = p_obs_log2.len();
+                let mut p_oil_obs: &[f64] = &p_oil_obs[..len];
+                let mut p_log2_oil_obs: &[f64] = &p_log2_oil_obs[..len];
+
+                while p_oil_obs.len() >= ELEMENTS_PER_256BIT {
+                    // エントロピー計算をAVX/AVX2で行う
+                    // 計算式はフォールバック版も参照
+
+                    // メモリからデータを読み込み
+                    let pp = _mm256_loadu_pd(p_oil_obs.as_ptr());
+                    let p_l2 = _mm256_loadu_pd(p_log2_oil_obs.as_ptr());
+                    let p_obs_l2 = _mm256_loadu_pd(p_obs_log2.as_ptr());
+
+                    // -pp * (p_log2 - p_obs_log2) をする
+                    // 符号を調整するため順番が逆になる
+                    let sub = _mm256_sub_pd(p_obs_l2, p_l2);
+                    let mul = _mm256_mul_pd(pp, sub);
+                    entropy256 = _mm256_add_pd(entropy256, mul);
+
+                    p_oil_obs = &p_oil_obs[ELEMENTS_PER_256BIT..];
+                    p_log2_oil_obs = &p_log2_oil_obs[ELEMENTS_PER_256BIT..];
+                    p_obs_log2 = &p_obs_log2[ELEMENTS_PER_256BIT..];
+                }
+
+                // フォールバック
+                for (&pp, &p_log2, &p_obs_log2) in izip!(p_oil_obs, p_log2_oil_obs, p_obs_log2) {
+                    // dH = -p(v_obs) * p(配置 | v_obs) * log(p(配置 | v_obs))
+                    //    = -p(配置, v_obs) * log(p(配置, v_obs) / p(v_obs))
+                    //    = -p(配置, v_obs) * (log(p(配置, v_obs)) - log(p(v_obs)))
+                    entropy -= pp * (p_log2 - p_obs_log2);
+                }
             }
-        }
 
-        entropy
+            // TODO: 水平加算を理解する
+            let mut buffer = [0.0; ELEMENTS_PER_256BIT];
+            _mm256_storeu_pd(buffer.as_mut_ptr(), entropy256);
+
+            for &v in buffer.iter() {
+                entropy += v;
+            }
+
+            entropy
+        }
     }
 
     /// スコア（= 相互情報量 / 調査コスト）を計算する
     ///
     /// スコアは大きいほどよい
     fn calc_score(&mut self, env: &Env, prob_table: &mut ProbTable) -> f64 {
-        let mutual_information =
-            env.base_entropy - unsafe { self.calc_conditional_entropy(env, prob_table) };
+        let mutual_information = env.base_entropy - self.calc_conditional_entropy(env, prob_table);
         let score = mutual_information * (self.selected_count as f64).sqrt();
         score
     }
