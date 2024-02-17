@@ -11,7 +11,7 @@ use rustc_hash::FxHashSet;
 use std::{
     cmp::Reverse,
     fmt::Display,
-    io::{self, BufReader},
+    io::{self, BufReader, BufWriter, StdoutLock, Write},
 };
 
 #[derive(Debug, Clone)]
@@ -108,8 +108,9 @@ impl Display for Oils {
     }
 }
 
-pub struct Judge {
+pub struct Judge<'a> {
     source: LineSource<BufReader<io::Stdin>>,
+    writer: BufWriter<StdoutLock<'a>>,
     wa: FxHashSet<Vec<Coord>>,
     comment_buf: Vec<String>,
     color_buf: Vec<Map2d<f64>>,
@@ -118,11 +119,13 @@ pub struct Judge {
 }
 
 #[allow(dead_code)]
-impl Judge {
+impl<'a> Judge<'a> {
     pub fn new() -> Self {
         let source = LineSource::new(BufReader::new(io::stdin()));
+        let writer = BufWriter::new(io::stdout().lock());
         Self {
             source,
+            writer,
             wa: FxHashSet::default(),
             comment_buf: vec![],
             color_buf: vec![],
@@ -197,7 +200,8 @@ impl Judge {
             .map(|c| format!("{} {}", c.row, c.col))
             .join(" ");
 
-        println!("q {} {}", len, coords);
+        writeln!(self.writer, "q {} {}", len, coords).unwrap();
+        self.writer.flush().unwrap();
 
         input! {
             from &mut self.source,
@@ -228,7 +232,8 @@ impl Judge {
             .map(|c| format!("{} {}", c.row, c.col))
             .join(" ");
 
-        println!("a {} {}", len, coords_str);
+        writeln!(self.writer, "a {} {}", len, coords_str).unwrap();
+        self.writer.flush().unwrap();
 
         input! {
             from &mut self.source,
@@ -253,7 +258,7 @@ impl Judge {
 
     fn flush_comments(&mut self) {
         for comment in &self.comment_buf {
-            println!("# {}", comment);
+            writeln!(self.writer, "# {}", comment).unwrap();
         }
 
         self.comment_buf.clear();
@@ -263,12 +268,12 @@ impl Judge {
                 for col in 0..colors.size {
                     let c = Coord::new(row, col);
                     let v = ((1.0 - colors[c].clamp(0.0, 1.0)) * 255.0).round() as u8;
-                    let color = format!("#{:02x}{:02x}{:02x}", v, v, 255);
-                    println!("#c {row} {col} {color}");
+                    writeln!(self.writer, "#c {row} {col} #{:02x}{:02x}{:02x}", v, v, 255).unwrap();
                 }
             }
         }
 
+        self.writer.flush().unwrap();
         self.color_buf.clear();
     }
 }

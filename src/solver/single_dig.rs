@@ -13,17 +13,17 @@ use crate::{
 
 use super::Solver;
 
-pub struct SingleDigSolver {
-    judge: Judge,
+pub struct SingleDigSolver<'a> {
+    judge: Judge<'a>,
 }
 
-impl SingleDigSolver {
-    pub fn new(judge: Judge) -> Self {
+impl<'a> SingleDigSolver<'a> {
+    pub fn new(judge: Judge<'a>) -> Self {
         Self { judge }
     }
 }
 
-impl Solver for SingleDigSolver {
+impl<'a> Solver for SingleDigSolver<'a> {
     fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();

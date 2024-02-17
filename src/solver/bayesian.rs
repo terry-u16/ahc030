@@ -10,18 +10,18 @@ use crate::{
 
 use super::Solver;
 
-pub struct BayesianSolver {
-    judge: Judge,
+pub struct BayesianSolver<'a> {
+    judge: Judge<'a>,
 }
 
 #[allow(dead_code)]
-impl BayesianSolver {
-    pub fn new(judge: Judge) -> Self {
+impl<'a> BayesianSolver<'a> {
+    pub fn new(judge: Judge<'a>) -> Self {
         Self { judge }
     }
 }
 
-impl Solver for BayesianSolver {
+impl<'a> Solver for BayesianSolver<'a> {
     fn solve(&mut self, input: &crate::problem::Input) {
         let (mut mean, mut covariance) = sample_prior_dist(input);
         let vec_len = mean.len();

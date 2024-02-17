@@ -17,12 +17,12 @@ use self::observation::ObservationManager;
 
 use super::Solver;
 
-pub struct MultiDigSolver {
-    judge: Judge,
+pub struct MultiDigSolver<'a> {
+    judge: Judge<'a>,
 }
 
-impl MultiDigSolver {
-    pub fn new(judge: Judge) -> Self {
+impl<'a> MultiDigSolver<'a> {
+    pub fn new(judge: Judge<'a>) -> Self {
         Self { judge }
     }
 
@@ -39,7 +39,7 @@ impl MultiDigSolver {
     }
 }
 
-impl Solver for MultiDigSolver {
+impl<'a> Solver for MultiDigSolver<'a> {
     fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
