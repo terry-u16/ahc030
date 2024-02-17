@@ -1,11 +1,11 @@
 {
   "ProblemOption": {
-    "ProblemName": "ahc025",
+    "ProblemName": "ahc030",
     "TimeLimit": "00:00:05"
   },
   "RunnerOption": {
     "StartSeed": 0,
-    "EndSeed": 300,
+    "EndSeed": 1000,
     "ReferenceScore": 100000000,
     "LocalParallelCount": 16,
     "CloudParallelCount": 300,
