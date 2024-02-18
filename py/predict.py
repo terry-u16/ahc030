@@ -12,11 +12,8 @@ def gaussian_kernel(
     t1: float,
     t2: float,
     t3: float,
-    t4: float,
 ) -> float:
-    return (
-        t1 * np.dot(x1, x2) + t2 * np.exp(-np.linalg.norm(x1 - x2) ** 2 / t3) + t4
-    )
+    return t1 * np.dot(x1, x2) + t2 * np.exp(-np.linalg.norm(x1 - x2) ** 2 / t3)
 
 
 def calc_kernel_matrix(
@@ -25,18 +22,14 @@ def calc_kernel_matrix(
     t1: float,
     t2: float,
     t3: float,
-    t4: float,
 ) -> np.ndarray:
     n = x1.shape[0]
     m = x2.shape[0]
     k = np.zeros((n, m))
 
     for i in range(n):
-        for j in range(i, m):
-            delta = 1 if i == j else 0
-            v = gaussian_kernel(x1[i, :], x2[j, :], t1, t2, t3, t4 * delta)
-            k[i, j] = v
-            k[j, i] = v
+        for j in range(m):
+            k[i, j] = gaussian_kernel(x1[i, :], x2[j, :], t1, t2, t3)
 
     return k
 
@@ -51,8 +44,8 @@ def predict_y(
     t4: float,
 ) -> float:
     y_mean = np.mean(y)
-    k = calc_kernel_matrix(x, x, t1, t2, t3, t4)
-    kk = calc_kernel_matrix(x, xx, t1, t2, t3, t4)
+    k = calc_kernel_matrix(x, x, t1, t2, t3) + t4 * np.eye(x.shape[0])
+    kk = calc_kernel_matrix(x, xx, t1, t2, t3)
     yy = kk.transpose() @ np.linalg.solve(k, y - y_mean)
     return yy + y_mean
 
@@ -67,7 +60,7 @@ def calc_log_likelihood(
 ) -> float:
     y_mean = np.mean(y)
     y = y - y_mean
-    k = calc_kernel_matrix(x, x, t1, t2, t3, t4)
+    k = calc_kernel_matrix(x, x, t1, t2, t3) + t4 * np.eye(x.shape[0])
     yy = y.transpose() @ np.linalg.solve(k, y)
     return -np.log(np.linalg.det(k)) - yy
 
@@ -145,7 +138,7 @@ def predict_one(
 
     optuna.logging.set_verbosity(optuna.logging.INFO)
 
-    pred = predict_y(x_matrix, data_array, new_x,  t1, t2, t3, t4)
+    pred = predict_y(x_matrix, data_array, new_x, t1, t2, t3, t4)
 
     return pred
 
