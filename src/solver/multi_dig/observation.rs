@@ -1,6 +1,5 @@
 use crate::{
     common::ChangeMinMax,
-    data_structures::AlignedArrayU32,
     distributions::GaussianDistribution,
     grid::{Coord, CoordDiff, Map2d},
     problem::Input,
@@ -13,12 +12,12 @@ use std::cmp::Reverse;
 pub(super) struct ObservationManager {
     pub observations: Vec<Observation>,
     pub obs_log_likelihoods: Vec<f32>,
-    obs_log_likelihoods_offsets: AlignedArrayU32,
+    pub obs_log_likelihoods_offsets: Vec<u32>,
     /// indices[oil_i][shift] := 影響するobs_iのVec
     pub relative_observation_indices: Vec<Map2d<Vec<usize>>>,
     /// indices[oil_i][shift] := 影響するcountのVec
     pub relative_observation_cnt: Vec<Map2d<Vec<usize>>>,
-    pub relative_observation_cnt_u32: Vec<Map2d<AlignedArrayU32>>,
+    pub relative_observation_cnt_u32: Vec<Map2d<Vec<u32>>>,
     /// indices[obs_i] := 影響する (oil_i, count, shift) のVec
     pub inv_relative_observation_indices: Vec<Vec<(usize, usize, CoordDiff)>>,
     /// matrix[obs_i][oil_i][shift] := oil_iをshiftだけ動かした領域とobs_iの重なりの数
@@ -38,16 +37,9 @@ impl ObservationManager {
         let relative_observation_cnt = (0..input.oil_count)
             .map(|_| Map2d::new_with(vec![], input.map_size))
             .collect();
-
         let relative_observation_cnt_u32 = (0..input.oil_count)
-            .map(|_| {
-                Map2d::new_with(
-                    AlignedArrayU32::new(input.max_observation()),
-                    input.map_size,
-                )
-            })
+            .map(|_| Map2d::new_with(vec![], input.map_size))
             .collect();
-
         let observations = vec![];
         let inv_relative_observation_indices = vec![];
         let overlaps = vec![];
@@ -72,12 +64,10 @@ impl ObservationManager {
             .collect_vec();
         let overlap_min_max = vec![];
 
-        let obs_log_likelihoods_offsets = AlignedArrayU32::new(input.max_observation());
-
         Self {
             observations,
             obs_log_likelihoods: vec![],
-            obs_log_likelihoods_offsets,
+            obs_log_likelihoods_offsets: vec![],
             relative_observation_indices,
             relative_observation_cnt,
             relative_observation_cnt_u32,
@@ -92,7 +82,8 @@ impl ObservationManager {
     pub(super) fn add_observation(&mut self, input: &Input, observation: Observation) {
         let obs_id = self.observations.len();
 
-        self.obs_log_likelihoods_offsets[obs_id] = self.obs_log_likelihoods.len() as u32;
+        self.obs_log_likelihoods_offsets
+            .push(self.obs_log_likelihoods.len() as u32);
 
         for &v in observation.log_likelihoods.iter() {
             self.obs_log_likelihoods.push(v as f32);
@@ -138,7 +129,7 @@ impl ObservationManager {
                     overlap_max.change_max(count);
                     relative_observation_indices[c].push(obs_id);
                     relative_observation_cnt[c].push(count);
-                    relative_observation_cnt_u32[c][obs_id] = count as u32;
+                    relative_observation_cnt_u32[c].push(count as u32);
                     inv_relative_observation_indices.push((oil_i, count, shift));
                 }
             }
@@ -266,10 +257,6 @@ impl ObservationManager {
         }
 
         self.shift_candidates = shift_candidates;
-    }
-
-    pub(super) fn obs_log_likelihoods_offsets(&self) -> &[u32] {
-        &self.obs_log_likelihoods_offsets[..self.observations.len()]
     }
 }
 
