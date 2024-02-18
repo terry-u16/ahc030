@@ -134,8 +134,10 @@ fn choose_next_pos(
         .copied()
         .unwrap_or(0) as usize;
 
+    // log2のテーブルを作成
+    // p log p はp=1のとき0になるため、適当な値を入れてよい
     let log_table = (0..=sample_count)
-        .map(|v| (v.max(1) as f64 / sample_count as f64).log2())
+        .map(|v| (1.0 / v.max(1) as f64).log2())
         .collect::<Vec<_>>();
 
     let mut counts = Map2d::new_with(vec![0; max_v + 1], input.map_size);
@@ -147,7 +149,7 @@ fn choose_next_pos(
     }
 
     let mut candidates = vec![];
-    let mut best_entropy = f64::MIN;
+    let mut best_entropy = f64::MAX;
 
     for row in 0..input.map_size {
         for col in 0..input.map_size {
@@ -157,15 +159,17 @@ fn choose_next_pos(
                 continue;
             }
 
-            // エントロピーを計算し、最大となる箇所を選ぶ
+            // エントロピーを計算し、最小となる箇所（相互情報量が最大となる箇所）を選ぶ
             let mut entropy = 0.0;
 
             for &c in counts[c].iter() {
+                // H(配置|観測値) = Σ_i p(観測値=i)H(配置|観測値=i)
+                //               = Σ_i p(観測値=i) log(n(配置|観測値=i))
                 let p = c as f64 / sample_count as f64;
                 entropy -= p * log_table[c];
             }
 
-            if best_entropy.change_max(entropy) {
+            if best_entropy.change_min(entropy) {
                 candidates.clear();
             }
 
@@ -176,9 +180,13 @@ fn choose_next_pos(
     }
 
     let c = candidates.choose(rng).copied();
+    let mutual_info = -log_table[sample_count] - best_entropy;
 
     if let Some(c) = c {
-        judge.comment(&format!("next: {} with entropy {:.3}", c, best_entropy));
+        judge.comment(&format!(
+            "next: {} with mutual information {:.3}",
+            c, mutual_info
+        ));
     }
 
     c
@@ -264,6 +272,8 @@ struct State {
     hash: u64,
 }
 
+static mut BEST_SHIFT_BUF: Vec<CoordDiff> = vec![];
+
 impl State {
     fn new(shift: Vec<CoordDiff>, mut map: Map2d<Option<i32>>, env: &Env) -> Self {
         for (oil, &shift) in env.input.oils.iter().zip(shift.iter()) {
@@ -334,7 +344,8 @@ impl State {
 
         for &oil_i in &oil_indices {
             let mut best_violation = i32::MAX;
-            let mut best_shifts = vec![];
+            let best_shifts = unsafe { &mut BEST_SHIFT_BUF };
+            best_shifts.clear();
             self.remove_oil(env, oil_i);
 
             for &shift in env.shift_candidates[oil_i].iter() {
