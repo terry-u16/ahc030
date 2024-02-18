@@ -69,7 +69,7 @@ for iteration in range(1, 1000):
         }
     )
 
-    timeout = 600 if m >= 12 else 480 if m >= 8 else 360
+    timeout = 450 if m >= 12 else 300
 
     study.optimize(objective, timeout=timeout)
 
