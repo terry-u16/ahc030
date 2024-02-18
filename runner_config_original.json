@@ -1,0 +1,50 @@
+{
+  "ProblemOption": {
+    "ProblemName": "ahc030",
+    "TimeLimit": "00:00:05"
+  },
+  "RunnerOption": {
+    "StartSeed": 0,
+    "EndSeed": 1000,
+    "ReferenceScore": 100000000,
+    "LocalParallelCount": 16,
+    "CloudParallelCount": 300,
+    "SummaryFilePath": ".\\data\\score_history.txt",
+    "ResultDirectoryPath": ".\\data\\results"
+  },
+  "ExecutionOption": {
+    "ScoreRegex": "^Score = (?<score>\\d+)$",
+    "SeedFormat": "0000",
+    "Timeout": "00:00:30",
+    "LocalExecutionSteps": [
+      {
+        "ExecutionCommand": "tester.exe ahc030.exe",
+        "StdInPath": "data/in/{SEED}.txt",
+        "StdOutPath": "data/out/{SEED}.txt",
+        "StdErrorPath": "data/err/{SEED}.txt"
+      }
+    ],
+    "CloudExecutionSteps": [
+      {
+        "ExecutionCommand": "tester main",
+        "StdInPath": "in/{SEED}.txt",
+        "StdOutPath": null,
+        "StdErrorPath": null
+      }
+    ],
+    "Files": [
+      "main",
+      "tester",
+      "in/{SEED}.txt"
+    ]
+  },
+  "CompileOption": {
+    "ExeName": "main",
+    "Files": [
+      {
+        "Source": "src/bin/a.rs",
+        "Destination": "src/bin/main.rs"
+      }
+    ]
+  }
+}
