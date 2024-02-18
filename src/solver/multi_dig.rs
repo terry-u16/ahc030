@@ -58,7 +58,14 @@ impl<'a> Solver for MultiDigSolver<'a> {
 
         const ANSWER_THRESHOLD_RATIO: f64 = 100.0;
 
-        for turn in 0..input.map_size * input.map_size * 2 {
+        while self.judge.can_query() {
+            let turn = self.judge.query_count() + 1;
+            eprintln!(
+                "===== turn {} / {} =====",
+                turn,
+                self.judge.max_query_count()
+            );
+
             // TLE緊急回避モード
             if input.duration_corrector.elapsed(since).as_secs_f64() >= 2.95 {
                 if self.answer_all(&states, input).is_ok() {
@@ -71,13 +78,6 @@ impl<'a> Solver for MultiDigSolver<'a> {
 
                 return;
             }
-
-            eprint!("turn {}: ", turn);
-
-            for cands in &env.obs.shift_candidates {
-                eprint!("{} ", cands.len());
-            }
-            eprintln!();
 
             // 新たな置き方を生成
             states = generator::generate_states(&env, states, turn_duration * 0.7, &mut rng);
@@ -132,11 +132,8 @@ impl<'a> Solver for MultiDigSolver<'a> {
             } else {
                 1.0
             };
-            let max_sample_count = if turn < input.map_size * input.map_size {
-                input.map_size * input.map_size
-            } else {
-                input.map_size * input.map_size / 8
-            };
+
+            let max_sample_count = input.map_size * input.map_size;
 
             let targets = sampler::select_sample_points(
                 input,

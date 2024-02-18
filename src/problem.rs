@@ -176,6 +176,14 @@ impl<'a> Judge<'a> {
         Input::new(n, m, eps, oils)
     }
 
+    pub fn query_count(&self) -> usize {
+        self.query_count
+    }
+
+    pub fn max_query_count(&self) -> usize {
+        self.query_limit
+    }
+
     pub fn can_query(&self) -> bool {
         self.query_count < self.query_limit
     }

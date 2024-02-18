@@ -397,7 +397,7 @@ pub(super) fn generate_states(
     }
 
     eprintln!(
-        "all_iter: {} valid_iter: {} accepted_count: {}",
+        "[Generator] all_iter: {} valid_iter: {} accepted_count: {}",
         all_iter, valid_iter, accepted_count
     );
 
