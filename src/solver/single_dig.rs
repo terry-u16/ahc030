@@ -32,8 +32,7 @@ impl<'a> Solver for SingleDigSolver<'a> {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
 
-        let each_duration = 2.0 / (input.map_size * input.map_size) as f64;
-        let mut next_pos = None;
+        let each_duration = 2.5 / (input.map_size * input.map_size) as f64;
         let mut states = vec![State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
             env.map.clone(),
@@ -61,25 +60,15 @@ impl<'a> Solver for SingleDigSolver<'a> {
                         return;
                     }
                 }
-            } else if states.len() >= 2 {
-                next_pos = choose_next_pos(&states, &mut rng, input, &env, &mut self.judge);
             }
 
-            let coord = next_pos.take().unwrap_or_else(|| loop {
-                let row = rng.gen_range(0..input.map_size);
-                let col = rng.gen_range(0..input.map_size);
-                let c = Coord::new(row, col);
+            let next_pos = choose_next_pos(&states, &mut rng, input, &env, &mut self.judge);
 
-                if env.map[c].is_none() {
-                    break c;
-                }
-            });
-
-            let observation = self.judge.query_single(coord);
-            env.add_observation(coord, observation);
+            let observation = self.judge.query_single(next_pos);
+            env.add_observation(next_pos, observation);
 
             for s in states.iter_mut() {
-                s.add_observation(&env, coord, observation);
+                s.add_observation(&env, next_pos, observation);
             }
 
             let min_violation = states.iter().map(|s| s.violations).min().unwrap();
@@ -108,10 +97,48 @@ fn choose_next_pos(
     input: &Input,
     env: &Env<'_>,
     judge: &mut Judge,
-) -> Option<Coord> {
+) -> Coord {
     let mut maps = vec![];
     let sample_count = 200.min(solutions.len());
-    let states = solutions.choose_multiple(rng, sample_count);
+    let mut states = solutions.choose_multiple(rng, sample_count);
+
+    if states.len() == 1 {
+        let mut map = Map2d::new_with(0, input.map_size);
+        let state = states.next().unwrap();
+
+        for (&shift, oil) in state.shift.iter().zip(input.oils.iter()) {
+            for &p in oil.pos.iter() {
+                let p = p + shift;
+
+                map[p] += 1;
+            }
+        }
+
+        let mut exist = vec![];
+        let mut not_exist = vec![];
+
+        for row in 0..input.map_size {
+            for col in 0..input.map_size {
+                let c = Coord::new(row, col);
+
+                if env.map[c].is_some() {
+                    continue;
+                }
+
+                if map[c] > 0 {
+                    exist.push(c);
+                } else {
+                    not_exist.push(c);
+                }
+            }
+        }
+
+        // ブロックがある場所の面積の方が小さいので、そのような場所から選ぶことで早く間違いに気付かせる
+        return exist
+            .choose(rng)
+            .copied()
+            .unwrap_or_else(|| not_exist.choose(rng).copied().unwrap());
+    }
 
     for state in states {
         let mut map = Map2d::new_with(0, input.map_size);
@@ -179,15 +206,13 @@ fn choose_next_pos(
         }
     }
 
-    let c = candidates.choose(rng).copied();
+    let c = candidates.choose(rng).copied().unwrap();
     let mutual_info = -log_table[sample_count] - best_entropy;
 
-    if let Some(c) = c {
-        judge.comment(&format!(
-            "next: {} with mutual information {:.3}",
-            c, mutual_info
-        ));
-    }
+    judge.comment(&format!(
+        "next: {} with mutual information {:.3}",
+        c, mutual_info
+    ));
 
     c
 }
