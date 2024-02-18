@@ -165,73 +165,33 @@ def predict(
 if __name__ == "__main__":
     (x_matrix, k_array, b_array, r_array, multi_array) = load_data()
 
+    n = 20
+    m = 15
+    eps = 0.2
+    avg = 10
+
+    print(f"n={n}, m={m}, eps={eps}, avg={avg}")
+
     new_x = np.array(
-        [[(10 - 10) / 10, math.sqrt(2) / 4, 0.01 * 5, math.sqrt(25) / 8]],
+        [[(n - 10) / 10, math.sqrt(m) / 4, eps * 5, math.sqrt(avg) / 8]],
         dtype=np.float64,
     )
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study(
-        direction="maximize",
-    )
-    objective = Objective(x_matrix, k_array)
-    study.optimize(objective, n_trials=500)
 
-    print("param_k", study.best_trial.params)
-
-    t1 = study.best_trial.params["t1"]
-    t2 = study.best_trial.params["t2"]
-    t3 = study.best_trial.params["t3"]
-    t4 = study.best_trial.params["t4"]
-
-    pred_k = predict_y(x_matrix, k_array, new_x, t1, t2, t3, t4)
+    print("=== k ===")
+    pred_k = predict_one(x_matrix, k_array, new_x, 100)
     pred_k = pred_k**2
     print("pred_k", pred_k)
 
-    study = optuna.create_study(
-        direction="maximize",
-    )
-    objective = Objective(x_matrix, b_array)
-    study.optimize(objective, n_trials=500)
-
-    print("param_b", study.best_trial.params)
-
-    t1 = study.best_trial.params["t1"]
-    t2 = study.best_trial.params["t2"]
-    t3 = study.best_trial.params["t3"]
-    t4 = study.best_trial.params["t4"]
-
-    pred_b = predict_y(x_matrix, b_array, new_x, t1, t2, t3, t4)
+    print("=== b ===")
+    pred_b = predict_one(x_matrix, b_array, new_x, 100)
     print("pred_b", pred_b)
 
-    study = optuna.create_study(
-        direction="maximize",
-    )
-    objective = Objective(x_matrix, r_array)
-    study.optimize(objective, n_trials=500)
-
-    print("param_r", study.best_trial.params)
-
-    t1 = study.best_trial.params["t1"]
-    t2 = study.best_trial.params["t2"]
-    t3 = study.best_trial.params["t3"]
-    t4 = study.best_trial.params["t4"]
-
-    pred_r = predict_y(x_matrix, r_array, new_x, t1, t2, t3, t4)
+    print("=== r ===")
+    pred_r = predict_one(x_matrix, r_array, new_x, 100)
     print("pred_r", pred_r)
 
-    study = optuna.create_study(
-        direction="maximize",
-    )
-    objective = Objective(x_matrix, multi_array)
-    study.optimize(objective, n_trials=500)
-
-    print("param_multi", study.best_trial.params)
-
-    t1 = study.best_trial.params["t1"]
-    t2 = study.best_trial.params["t2"]
-    t3 = study.best_trial.params["t3"]
-    t4 = study.best_trial.params["t4"]
-
-    pred_multi = predict_y(x_matrix, multi_array, new_x, t1, t2, t3, t4)
+    print("=== multi ===")
+    pred_multi = predict_one(x_matrix, multi_array, new_x, 100)
     print("pred_multi", pred_multi)
