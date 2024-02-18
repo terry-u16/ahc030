@@ -1,5 +1,6 @@
 use crate::{
     common::ChangeMinMax as _,
+    data_structures::AlignedArrayU32,
     grid::{Coord, CoordDiff, Map2d},
     problem::Input,
 };
@@ -20,7 +21,7 @@ pub(super) struct State {
     pub shift: Vec<CoordDiff>,
     pub log_likelihood: f64,
     counts: Vec<usize>,
-    counts_u32: Vec<u32>,
+    counts_u32: AlignedArrayU32,
     hash: u64,
 }
 
@@ -28,7 +29,6 @@ impl State {
     pub(super) fn new(shift: Vec<CoordDiff>, env: &Env) -> Self {
         let mut log_likelihood = 0.0;
         let counts = vec![0; env.obs.observations.len()];
-        let counts_i32 = vec![0; env.obs.observations.len()];
 
         for (obs, &count) in env.obs.observations.iter().zip(counts.iter()) {
             log_likelihood += obs.log_likelihoods[count];
@@ -40,11 +40,13 @@ impl State {
             hash ^= env.input.hashes[i][Coord::try_from(*shift).unwrap()];
         }
 
+        let counts_u32 = AlignedArrayU32::new(env.input.max_observation());
+
         let mut state = Self {
             shift,
             log_likelihood,
             counts,
-            counts_u32: counts_i32,
+            counts_u32,
             hash,
         };
 
@@ -93,24 +95,24 @@ impl State {
 
         // AVX2を使って高速化
         let log_likelihoods = &env.obs.obs_log_likelihoods;
-        let mut offsets: &[u32] = &env.obs.obs_log_likelihoods_offsets;
-        let mut cnts: &[u32] = &self.counts_u32;
+        let mut offsets: &[u32] = env.obs.obs_log_likelihoods_offsets();
+        let mut cnts: &[u32] = &self.counts_u32[..env.obs.observations.len()];
 
-        let mut cnts_added: &[u32] =
-            &env.obs.relative_observation_cnt_u32[oil_i][Coord::try_from(shift).unwrap()];
+        let mut cnts_added: &[u32] = &env.obs.relative_observation_cnt_u32[oil_i]
+            [Coord::try_from(shift).unwrap()][..env.obs.observations.len()];
         let mut log_likelihood = _mm256_broadcast_ss(&0.0);
 
         const ELEMENTS_PER_256BIT: usize = 8;
 
         while offsets.len() >= ELEMENTS_PER_256BIT {
             // j番目の観測が保存されている箇所の先頭のindex
-            let offset = _mm256_loadu_si256(offsets.as_ptr() as *const __m256i);
+            let offset = _mm256_load_si256(offsets.as_ptr() as *const __m256i);
 
             // j番目の観測について、現在の配置だと仮定したときの真の埋蔵量
-            let cnt = _mm256_loadu_si256(cnts.as_ptr() as *const __m256i);
+            let cnt = _mm256_load_si256(cnts.as_ptr() as *const __m256i);
 
             // oil_iを追加したときの真の埋蔵量の増加量
-            let cnt_added = _mm256_loadu_si256(cnts_added.as_ptr() as *const __m256i);
+            let cnt_added = _mm256_load_si256(cnts_added.as_ptr() as *const __m256i);
 
             // offset, cnt, cnt_addedを足す
             let offset = _mm256_add_epi32(offset, cnt);
@@ -147,6 +149,7 @@ impl State {
 
     pub(super) fn add_last_observation(&mut self, env: &Env) {
         assert!(self.counts.len() + 1 == env.obs.observations.len());
+        let obs_id = self.counts.len();
 
         let mut count = 0;
         let overlaps = env.obs.overlaps.last().unwrap();
@@ -159,7 +162,8 @@ impl State {
         self.log_likelihood += observation.log_likelihoods[count];
 
         self.counts.push(count);
-        self.counts_u32.push(count as u32);
+
+        self.counts_u32[obs_id] = count as u32;
     }
 
     fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {

@@ -62,6 +62,10 @@ impl Input {
             duration_corrector,
         }
     }
+
+    pub fn max_observation(&self) -> usize {
+        self.map_size * self.map_size * 2
+    }
 }
 
 #[derive(Debug, Clone)]
