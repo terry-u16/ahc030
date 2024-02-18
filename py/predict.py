@@ -4,6 +4,7 @@ import os
 
 import numpy as np
 import optuna
+import pack
 
 
 def gaussian_kernel(
@@ -121,7 +122,7 @@ def load_data():
 
 def predict_one(
     x_matrix: np.ndarray, data_array: np.ndarray, new_x: np.ndarray, n_trials: int = 500
-) -> float:
+) -> tuple[float, float, float, float, float]:
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(
         direction="maximize",
@@ -140,7 +141,7 @@ def predict_one(
 
     pred = predict_y(x_matrix, data_array, new_x, t1, t2, t3, t4)
 
-    return pred
+    return pred, t1, t2, t3, t4
 
 
 def predict(
@@ -153,11 +154,11 @@ def predict(
         dtype=np.float64,
     )
 
-    pred_k = predict_one(x_matrix, k_array, new_x, n_trials)
+    pred_k, _, _, _, _ = predict_one(x_matrix, k_array, new_x, n_trials)
     pred_k = pred_k**2
-    pred_b = predict_one(x_matrix, b_array, new_x, n_trials)
-    pred_r = predict_one(x_matrix, r_array, new_x, n_trials)
-    pred_multi = predict_one(x_matrix, multi_array, new_x, n_trials)
+    pred_b, _, _, _, _ = predict_one(x_matrix, b_array, new_x, n_trials)
+    pred_r, _, _, _, _ = predict_one(x_matrix, r_array, new_x, n_trials)
+    pred_multi, _, _, _, _ = predict_one(x_matrix, multi_array, new_x, n_trials)
 
     return pred_k[0], pred_b[0], pred_r[0], pred_multi[0]
 
@@ -180,18 +181,58 @@ if __name__ == "__main__":
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     print("=== k ===")
-    pred_k = predict_one(x_matrix, k_array, new_x, 100)
+    pred_k, t1, t2, t3, t4 = predict_one(x_matrix, k_array, new_x)
     pred_k = pred_k**2
+    param_k = [t1, t2, t3, t4]
     print("pred_k", pred_k)
 
     print("=== b ===")
-    pred_b = predict_one(x_matrix, b_array, new_x, 100)
+    pred_b, t1, t2, t3, t4 = predict_one(x_matrix, b_array, new_x)
+    param_b = [t1, t2, t3, t4]
     print("pred_b", pred_b)
 
     print("=== r ===")
-    pred_r = predict_one(x_matrix, r_array, new_x, 100)
+    pred_r, t1, t2, t3, t4 = predict_one(x_matrix, r_array, new_x)
+    param_r = [t1, t2, t3, t4]
     print("pred_r", pred_r)
 
     print("=== multi ===")
-    pred_multi = predict_one(x_matrix, multi_array, new_x, 100)
+    pred_multi, t1, t2, t3, t4 = predict_one(x_matrix, multi_array, new_x)
+    param_multi = [t1, t2, t3, t4]
     print("pred_multi", pred_multi)
+
+    PARAM_PATH = "data/params.txt"
+
+    with open(PARAM_PATH, "w") as f:
+        params = {}
+
+        params["len"] = len(x_matrix)
+
+        n_vec = x_matrix[:, 0]
+        m_vec = x_matrix[:, 1]
+        eps_vec = x_matrix[:, 2]
+        avg_vec = x_matrix[:, 3]
+
+        f.write(f"const LEN: usize = {len(x_matrix)};\n")
+        f.write(f'const N: &[u8] = b"{pack.pack_vec(n_vec)}";\n')
+        f.write(f'const M: &[u8] = b"{pack.pack_vec(m_vec)}";\n')
+        f.write(f'const EPS: &[u8] = b"{pack.pack_vec(eps_vec)}";\n')
+        f.write(f'const AVG: &[u8] = b"{pack.pack_vec(avg_vec)}";\n')
+
+        f.write(f'const K: &[u8] = b"{pack.pack_vec(k_array)}";\n')
+        f.write(f'const B: &[u8] = b"{pack.pack_vec(b_array)}";\n')
+        f.write(f'const R: &[u8] = b"{pack.pack_vec(r_array)}";\n')
+        f.write(f'const MULTI: &[u8] = b"{pack.pack_vec(multi_array)}";\n')
+
+        f.write(
+            f'const PARAM_K: &[u8] = b"{pack.pack_vec(np.array(param_k, dtype=np.float64))}";\n'
+        )
+        f.write(
+            f'const PARAM_B: &[u8] = b"{pack.pack_vec(np.array(param_b, dtype=np.float64))}";\n'
+        )
+        f.write(
+            f'const PARAM_R: &[u8] = b"{pack.pack_vec(np.array(param_r, dtype=np.float64))}";\n'
+        )
+        f.write(
+            f'const PARAM_MULTI: &[u8] = b"{pack.pack_vec(np.array(param_multi, dtype=np.float64))}";\n'
+        )

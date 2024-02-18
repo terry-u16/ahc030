@@ -1,3 +1,5 @@
+pub mod params;
+
 use crate::{
     common::DurationCorrector,
     grid::{Coord, Map2d},
@@ -15,12 +17,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+use self::params::ParamSuggester;
+
 #[derive(Debug, Clone)]
 pub struct Input {
     pub map_size: usize,
     pub oil_count: usize,
     pub eps: f64,
     pub oils: Vec<Oils>,
+    pub avg_oil_size: f64,
     pub total_oil_tiles: usize,
     pub hashes: Vec<Map2d<u64>>,
     pub duration_corrector: DurationCorrector,
@@ -56,10 +61,11 @@ impl Input {
         }
 
         let total_oil_tiles = oils.iter().map(|o| o.len).sum();
+        let avg_oil_size = total_oil_tiles as f64 / oil_count as f64;
         let duration_corrector = DurationCorrector::from_env();
-        let time_conductor = TimeConductor::new();
+        let time_conductor = TimeConductor::new(map_size, oil_count, eps, avg_oil_size);
+        let params = Params::new(map_size, oil_count, eps, avg_oil_size);
         let since = Instant::now();
-        let params = Params::new();
 
         Self {
             map_size,
@@ -67,6 +73,7 @@ impl Input {
             eps,
             oils,
             total_oil_tiles,
+            avg_oil_size,
             hashes,
             duration_corrector,
             time_conductor,
@@ -122,12 +129,21 @@ impl Display for Oils {
 
 #[derive(Debug, Clone)]
 pub struct Params {
-    use_multi_dig_solver: bool,
+    pub use_multi_dig_solver: f64,
 }
 
 impl Params {
-    pub fn new() -> Self {
-        let use_multi_dig_solver = std::env::args().nth(1).unwrap_or("1".to_owned()) == "1";
+    pub fn new(map_size: usize, oil_count: usize, eps: f64, avg: f64) -> Self {
+        let use_multi_dig_solver = match std::env::args().nth(1) {
+            Some(s) => {
+                if s == "1" {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            None => ParamSuggester::gen_multi_pred().suggest(map_size, oil_count, eps, avg),
+        };
 
         Self {
             use_multi_dig_solver,
@@ -135,7 +151,7 @@ impl Params {
     }
 
     pub fn use_multi_dig_solver(&self) -> bool {
-        self.use_multi_dig_solver
+        self.use_multi_dig_solver >= 0.5
     }
 }
 
@@ -147,22 +163,22 @@ pub struct TimeConductor {
 }
 
 impl TimeConductor {
-    fn new() -> Self {
+    fn new(map_size: usize, oil_count: usize, eps: f64, avg: f64) -> Self {
         // ターンごとの実行時間は (1-x)^k + bx とする
         let k = std::env::args()
             .nth(2)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(4.907372080834737);
+            .unwrap_or_else(|| ParamSuggester::gen_k_pred().suggest(map_size, oil_count, eps, avg));
 
         let b = std::env::args()
             .nth(3)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0.36715240552756645);
+            .unwrap_or_else(|| ParamSuggester::gen_b_pred().suggest(map_size, oil_count, eps, avg));
 
         let ratio = std::env::args()
             .nth(4)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0.6192305809988612);
+            .unwrap_or_else(|| ParamSuggester::gen_r_pred().suggest(map_size, oil_count, eps, avg));
 
         Self { k, b, ratio }
     }
@@ -198,6 +214,14 @@ impl TimeConductor {
         }
 
         durations
+    }
+
+    pub fn k(&self) -> f64 {
+        self.k
+    }
+
+    pub fn b(&self) -> f64 {
+        self.b
     }
 
     pub fn phase_ratio(&self) -> f64 {
