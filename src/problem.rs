@@ -12,6 +12,7 @@ use std::{
     cmp::Reverse,
     fmt::Display,
     io::{self, BufReader, BufWriter, StdoutLock, Write},
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone)]
@@ -23,9 +24,14 @@ pub struct Input {
     pub total_oil_tiles: usize,
     pub hashes: Vec<Map2d<u64>>,
     pub duration_corrector: DurationCorrector,
+    pub time_conductor: TimeConductor,
+    pub since: Instant,
+    pub params: Params,
 }
 
 impl Input {
+    pub const TIME_LIMIT: Duration = Duration::new(2, 950_000_000);
+
     fn new(map_size: usize, oil_count: usize, eps: f64, oils: Vec<Oils>) -> Self {
         let mut counts = HashMap::new();
 
@@ -51,6 +57,9 @@ impl Input {
 
         let total_oil_tiles = oils.iter().map(|o| o.len).sum();
         let duration_corrector = DurationCorrector::from_env();
+        let time_conductor = TimeConductor::new();
+        let since = Instant::now();
+        let params = Params::new();
 
         Self {
             map_size,
@@ -60,6 +69,9 @@ impl Input {
             total_oil_tiles,
             hashes,
             duration_corrector,
+            time_conductor,
+            since,
+            params,
         }
     }
 }
@@ -105,6 +117,91 @@ impl Display for Oils {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Params {
+    use_multi_dig_solver: bool,
+}
+
+impl Params {
+    pub fn new() -> Self {
+        let use_multi_dig_solver = std::env::args().nth(1).unwrap_or("1".to_owned()) == "1";
+
+        Self {
+            use_multi_dig_solver,
+        }
+    }
+
+    pub fn use_multi_dig_solver(&self) -> bool {
+        self.use_multi_dig_solver
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TimeConductor {
+    k: f64,
+    b: f64,
+    ratio: f64,
+}
+
+impl TimeConductor {
+    fn new() -> Self {
+        // ターンごとの実行時間は (1-x)^k + bx とする
+        let k = std::env::args()
+            .nth(2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3.0);
+
+        let b = std::env::args()
+            .nth(3)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.1);
+
+        let ratio = std::env::args()
+            .nth(4)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.7);
+
+        Self { k, b, ratio }
+    }
+
+    pub fn get_time_table(
+        &self,
+        elapsed: Duration,
+        time_limit: Duration,
+        max_turn: usize,
+    ) -> Vec<Duration> {
+        let mut times_f64 = vec![];
+
+        for t in 0..max_turn {
+            let x = t as f64 / max_turn as f64;
+
+            let t = (1.0 - x).powf(self.k) + self.b * x;
+            times_f64.push(t);
+        }
+
+        for i in 1..max_turn {
+            times_f64[i] += times_f64[i - 1];
+        }
+
+        let total_time = times_f64.last().unwrap();
+
+        let mut durations = vec![];
+
+        let remaining = time_limit.saturating_sub(elapsed);
+
+        for &t in times_f64.iter() {
+            let t = elapsed + remaining.mul_f64(t / total_time);
+            durations.push(t);
+        }
+
+        durations
+    }
+
+    pub fn phase_ratio(&self) -> f64 {
+        self.ratio
     }
 }
 

@@ -32,7 +32,13 @@ impl<'a> Solver for SingleDigSolver<'a> {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
 
-        let each_duration = 2.5 / (input.map_size * input.map_size) as f64;
+        let elapsed = input.duration_corrector.elapsed(input.since);
+        let time_table = input.time_conductor.get_time_table(
+            elapsed,
+            Input::TIME_LIMIT,
+            self.judge.max_query_count(),
+        );
+
         let mut states = vec![State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
             env.map.clone(),
@@ -40,7 +46,10 @@ impl<'a> Solver for SingleDigSolver<'a> {
         )];
 
         for turn in 0..input.map_size * input.map_size {
-            states = generate_states(&env, states, each_duration, &mut rng);
+            let time_limit_turn = time_table[turn];
+            let duration =
+                time_limit_turn.saturating_sub(input.duration_corrector.elapsed(input.since));
+            states = generate_states(&env, states, duration.as_secs_f64(), &mut rng);
             states.sort_unstable();
             states.dedup();
 

@@ -649,12 +649,11 @@ fn annealing(
 
     loop {
         all_iter += 1;
-        if (all_iter & ((1 << 4) - 1)) == 0 {
-            let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
+        
+        let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
 
-            if time >= 1.0 {
-                break;
-            }
+        if time >= 1.0 {
+            break;
         }
 
         // 変形

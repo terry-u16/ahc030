@@ -10,7 +10,6 @@ use crate::{
 use rand::seq::SliceRandom;
 use rand_core::SeedableRng;
 use rand_pcg::Pcg64Mcg;
-use std::time::Instant;
 use std::vec;
 
 use self::observation::ObservationManager;
@@ -43,18 +42,19 @@ impl<'a> Solver for MultiDigSolver<'a> {
     fn solve(&mut self, input: &crate::problem::Input) {
         let mut env = Env::new(input);
         let mut rng = Pcg64Mcg::from_entropy();
-        let all_time_mul = if input.oil_count <= 8 && input.eps <= 0.15 {
-            2.0
-        } else {
-            1.0
-        };
-        let turn_duration = all_time_mul * 2.0 / ((input.map_size as f64).powi(2) * 2.0);
-        let since = Instant::now();
+
         let mut states = vec![State::new(
             vec![CoordDiff::new(0, 0); input.oil_count],
             &env,
         )];
         let mut prob_table = ProbTable::new(input);
+
+        let elapsed = input.duration_corrector.elapsed(input.since);
+        let time_table = input.time_conductor.get_time_table(
+            elapsed,
+            Input::TIME_LIMIT,
+            self.judge.max_query_count(),
+        );
 
         const ANSWER_THRESHOLD_RATIO: f64 = 100.0;
 
@@ -67,7 +67,7 @@ impl<'a> Solver for MultiDigSolver<'a> {
             );
 
             // TLE緊急回避モード
-            if input.duration_corrector.elapsed(since).as_secs_f64() >= 2.95 {
+            if input.duration_corrector.elapsed(input.since) >= Input::TIME_LIMIT {
                 if self.answer_all(&states, input).is_ok() {
                     return;
                 }
@@ -79,8 +79,13 @@ impl<'a> Solver for MultiDigSolver<'a> {
                 return;
             }
 
+            let time_limit_turn = time_table[turn as usize - 1];
+
             // 新たな置き方を生成
-            states = generator::generate_states(&env, states, turn_duration * 0.7, &mut rng);
+            let duration = (time_limit_turn
+                .saturating_sub(input.duration_corrector.elapsed(input.since)))
+            .mul_f64(input.time_conductor.phase_ratio());
+            states = generator::generate_states(&env, states, duration.as_secs_f64(), &mut rng);
             states.sort_unstable();
             states.dedup();
             states.shuffle(&mut rng);
@@ -123,24 +128,16 @@ impl<'a> Solver for MultiDigSolver<'a> {
                 }
             }
 
-            let time_mul = if turn < 10 {
-                20.0
-            } else if turn < 20 {
-                5.0
-            } else if turn < 50 {
-                2.0
-            } else {
-                1.0
-            };
-
             let max_sample_count = input.map_size * input.map_size;
+            let duration =
+                time_limit_turn.saturating_sub(input.duration_corrector.elapsed(input.since));
 
             let targets = sampler::select_sample_points(
                 input,
                 &mut prob_table,
                 states.clone(),
                 max_sample_count,
-                turn_duration * 0.3 * time_mul,
+                duration.as_secs_f64(),
                 &mut rng,
             );
 
