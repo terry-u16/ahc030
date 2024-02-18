@@ -6,9 +6,7 @@ import subprocess
 
 import optuna
 
-STUDY_NAME = "ahc030-004"
 TIME_RATIO = 1.5
-
 
 class Objective:
     def __init__(self) -> None:
@@ -16,12 +14,12 @@ class Objective:
 
     def __call__(self, trial: optuna.trial.Trial) -> float:
         multi = trial.suggest_categorical("multi", [0, 1])
-        k = trial.suggest_float("k", 0.0, 10.0, log=False)
-        b = trial.suggest_float("b", 0.0, 1.0, log=False)
-        r = trial.suggest_float("r", 0.3, 0.9, log=False)
+        k = trial.suggest_float("k", 0.5, 50.0, log=True)
+        b = trial.suggest_float("b", 0.0, 0.1, log=False)
+        r = trial.suggest_float("r", 0.1, 0.9, log=False)
 
         min_seed = 0
-        max_seed = 1024
+        max_seed = 511
         batch_size = 64
         step = 0
         score_sum = 0.0
@@ -78,33 +76,36 @@ class Objective:
         return score_sum
 
 
-# subprocess.run("dotnet marathon compile-rust")
-subprocess.run("cargo build --release")
-shutil.move("../target/release/ahc030.exe", "./ahc030.exe")
+if __name__ == "__main__":
+    STUDY_NAME = "ahc030-004"
 
-objective = Objective()
+    # subprocess.run("dotnet marathon compile-rust")
+    subprocess.run("cargo build --release")
+    shutil.move("../target/release/ahc030.exe", "./ahc030.exe")
 
-study = optuna.create_study(
-    direction="minimize",
-    study_name=STUDY_NAME,
-    storage="mysql+pymysql://default@localhost/optuna",
-    load_if_exists=True,
-    pruner=optuna.pruners.SuccessiveHalvingPruner(),
-)
+    objective = Objective()
 
-if len(study.trials) == 0:
-    study.enqueue_trial(
-        {
-            "multi": 1,
-            "k": 3.0,
-            "b": 0.1,
-            "r": 0.7,
-        }
+    study = optuna.create_study(
+        direction="minimize",
+        study_name=STUDY_NAME,
+        storage="mysql+pymysql://default@localhost/optuna",
+        load_if_exists=True,
+        pruner=optuna.pruners.SuccessiveHalvingPruner(),
     )
 
-# study.optimize(objective, timeout=1800)
-# print(study.best_trial)
+    if len(study.trials) == 0:
+        study.enqueue_trial(
+            {
+                "multi": 1,
+                "k": 3.0,
+                "b": 0.1,
+                "r": 0.7,
+            }
+        )
 
-optuna.visualization.plot_param_importances(study).show()
-optuna.visualization.plot_slice(study, params=["r", "k"]).show()
-optuna.visualization.plot_contour(study).show()
+    # study.optimize(objective, timeout=1800)
+    # print(study.best_trial)
+
+    optuna.visualization.plot_param_importances(study).show()
+    optuna.visualization.plot_slice(study, params=["r", "k"]).show()
+    optuna.visualization.plot_contour(study).show()

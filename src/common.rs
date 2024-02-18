@@ -37,6 +37,7 @@ impl DurationCorrector {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(1.0);
+        eprintln!("DURATION_MUL = {}", mul);
 
         Self::new(mul)
     }

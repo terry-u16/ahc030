@@ -23,6 +23,9 @@ struct Cli {
     /// Fix eps to the specified value
     #[clap(long = "eps")]
     eps: Option<f64>,
+    /// Fix avg to the specified value
+    #[clap(long = "avg")]
+    avg: Option<usize>,
 }
 
 fn main() {
@@ -49,7 +52,7 @@ fn main() {
             eprintln!("parse failed: {}", line);
             std::process::exit(1)
         });
-        let input = gen(seed, cli.N, cli.M, cli.eps);
+        let input = gen(seed, cli.N, cli.M, cli.eps, cli.avg);
         if cli.verbose {
             let total = input.ts.iter().map(|x| x.len()).sum::<usize>();
             println!(

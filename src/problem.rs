@@ -152,17 +152,17 @@ impl TimeConductor {
         let k = std::env::args()
             .nth(2)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(2.9062637699186498);
+            .unwrap_or(4.907372080834737);
 
         let b = std::env::args()
             .nth(3)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0.13145755097582992);
+            .unwrap_or(0.36715240552756645);
 
         let ratio = std::env::args()
             .nth(4)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0.6648270262190179);
+            .unwrap_or(0.6192305809988612);
 
         Self { k, b, ratio }
     }

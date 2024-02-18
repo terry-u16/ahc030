@@ -281,7 +281,13 @@ pub fn parse_output(input: &Input, f: &str) -> Result<Output, String> {
 
 const DIJ: [(usize, usize); 4] = [(0, 1), (1, 0), (0, !0), (!0, 0)];
 
-pub fn gen(seed: u64, fix_N: Option<usize>, fix_M: Option<usize>, fix_eps: Option<f64>) -> Input {
+pub fn gen(
+    seed: u64,
+    fix_N: Option<usize>,
+    fix_M: Option<usize>,
+    fix_eps: Option<f64>,
+    fix_avg: Option<usize>,
+) -> Input {
     let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(seed);
     let mut n = rng.gen_range(10i32..=20) as usize;
     if let Some(v) = fix_N {
@@ -295,7 +301,10 @@ pub fn gen(seed: u64, fix_N: Option<usize>, fix_M: Option<usize>, fix_eps: Optio
     if let Some(v) = fix_eps {
         eps = v;
     }
-    let avg = (rng.gen_range((n * n / 5) as i32..=(n * n / 2) as i32) as usize / m).max(4);
+    let mut avg = (rng.gen_range((n * n / 5) as i32..=(n * n / 2) as i32) as usize / m).max(4);
+    if let Some(v) = fix_avg {
+        avg = v;
+    }
     let delta = rng.gen_range(0..=avg as i32 - 4) as usize;
     let mut ts = vec![];
     for _ in 0..m {
