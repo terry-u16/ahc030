@@ -1,6 +1,9 @@
 use itertools::Itertools as _;
 use ordered_float::OrderedFloat;
-use rand::{seq::SliceRandom as _, Rng};
+use rand::{
+    seq::{IteratorRandom, SliceRandom as _},
+    Rng,
+};
 use rand_core::SeedableRng as _;
 use rand_distr::{Distribution as _, WeightedAliasIndex};
 use rand_pcg::Pcg64Mcg;
@@ -39,22 +42,20 @@ impl<'a> Solver for SingleDigSolver<'a> {
 
         for turn in 0..input.map_size * input.map_size {
             states = generate_states(&env, states, each_duration, &mut rng);
-            let candidates_len = states.len();
-
             states.sort_unstable();
             states.dedup();
 
             let min_violation = states.iter().map(|s| s.violations).min().unwrap();
             states.retain(|s| s.violations == min_violation);
-            eprintln!("turn: {}, states: {}", turn, candidates_len);
+            eprintln!("turn: {}, states: {}", turn, states.len());
 
             color_map(&states, &mut rng, &env, &mut self.judge);
 
             if states.len() == 1 {
-                let states = states.iter().next().unwrap();
+                let state = states.iter().next().unwrap();
 
-                if states.calc_score() == 0 {
-                    let answer = states.to_answer(input);
+                if state.calc_score() == 0 {
+                    let answer = state.to_answer(input);
 
                     if self.judge.answer(&answer).is_ok() {
                         return;
@@ -321,27 +322,20 @@ impl State {
     }
 
     fn neigh(mut self, env: &Env, rng: &mut impl Rng, choose_cnt: usize) -> Self {
-        let mut oil_indices = vec![];
-
-        for _ in 0..choose_cnt {
-            let oil = loop {
-                let oil = rng.gen_range(0..env.input.oil_count);
-
-                if !oil_indices.contains(&oil) {
-                    break oil;
-                }
-            };
-
-            oil_indices.push(oil);
-        }
+        let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
+        oil_indices.shuffle(rng);
 
         for &oil_i in &oil_indices {
             self.remove_oil(env, oil_i);
+
+            let shift = env.shift_candidates[oil_i].choose(rng).copied().unwrap();
+            self.add_oil(env, oil_i, shift);
         }
 
         for &oil_i in &oil_indices {
             let mut best_violation = i32::MAX;
             let mut best_shifts = vec![];
+            self.remove_oil(env, oil_i);
 
             for &shift in env.shift_candidates[oil_i].iter() {
                 let violation = self.add_oil_whatif(env, oil_i, shift);
@@ -571,6 +565,12 @@ fn generate_states(
             states.push(new_state);
         }
     }
+
+    eprintln!(
+        "all_iter: {}, violation: {}",
+        all_iter,
+        states.iter().map(|s| s.violations).min().unwrap()
+    );
 
     states
 }
