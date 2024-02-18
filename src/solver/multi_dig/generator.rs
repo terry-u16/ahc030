@@ -139,7 +139,7 @@ impl State {
 
         for (&offset, &cnt, &cnt_added) in izip!(offsets, cnts, cnts_added) {
             let index = offset + cnt + cnt_added;
-            log_likelihood += log_likelihoods[index as usize];
+            log_likelihood += log_likelihoods.get_unchecked(index as usize);
         }
 
         log_likelihood as f64
