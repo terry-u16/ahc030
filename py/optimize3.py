@@ -15,7 +15,7 @@ class Objective:
 
     def __call__(self, trial: optuna.trial.Trial) -> float:
         answer_threshold = trial.suggest_float(
-            "answer_threshold_ratio", 10.0, 100.0, log=True
+            "answer_threshold_ratio", 15.0, 100.0, log=True
         )
 
         min_seed = 0
