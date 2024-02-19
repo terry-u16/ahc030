@@ -147,6 +147,7 @@ pub struct Params {
     pub use_multi_dig_solver: f64,
     pub taboo_prob: f64,
     pub max_entropy_len: usize,
+    pub answer_threshold_ratio: f64,
 }
 
 impl Params {
@@ -167,24 +168,20 @@ impl Params {
         let use_multi_dig_solver =
             ParamSuggester::gen_multi_pred().suggest(map_size, oil_count, eps, avg);
 
-        let taboo_prob = std::env::args()
+        let taboo_prob = ParamSuggester::gen_taboo_pred().suggest(map_size, oil_count, eps, avg);
+        let max_entropy_len = ParamSuggester::gen_entropy_len_pred()
+            .suggest(map_size, oil_count, eps, avg)
+            .round() as usize;
+        let answer_threshold_ratio = std::env::args()
             .nth(1)
             .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| {
-                ParamSuggester::gen_taboo_pred().suggest(map_size, oil_count, eps, avg)
-            });
-        let max_entropy_len = std::env::args()
-            .nth(2)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| {
-                ParamSuggester::gen_entropy_len_pred().suggest(map_size, oil_count, eps, avg)
-            })
-            .round() as usize;
+            .unwrap_or(30.0);
 
         Self {
             use_multi_dig_solver,
             taboo_prob,
             max_entropy_len,
+            answer_threshold_ratio,
         }
     }
 

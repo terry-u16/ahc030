@@ -84,10 +84,9 @@ class Objective:
 
 def load_data():
     x_list = []
-    taboo_list = []
-    e_len_list = []
+    answer_list = []
 
-    OPT_RESULT_DIR = "data/opt2"
+    OPT_RESULT_DIR = "data/opt3"
 
     files = os.listdir(OPT_RESULT_DIR)
 
@@ -104,18 +103,12 @@ def load_data():
             x.append(math.sqrt(data["avg"]) / 8)
             x_list.append(x)
 
-            taboo_list.append(
-                math.log(
-                    data["params"]["taboo_prob"] / (1 - data["params"]["taboo_prob"])
-                )
-            )
-            e_len_list.append(math.sqrt(data["params"]["max_entropy_len"]))
+            answer_list.append(math.sqrt(data["params"]["answer_threshold_ratio"]))
 
     x_matrix = np.array(x_list, dtype=np.float64)
-    taboo_array = np.array(taboo_list, dtype=np.float64)
-    e_len_array = np.array(e_len_list, dtype=np.float64)
+    answer_array = np.array(answer_list, dtype=np.float64)
 
-    return x_matrix, taboo_array, e_len_array
+    return x_matrix, answer_array
 
 
 def predict_one(
@@ -145,23 +138,21 @@ def predict_one(
 def predict(
     n: int, m: int, eps: float, avg: int, n_trials: int = 500
 ) -> tuple[float, float, float, float]:
-    (x_matrix, taboo_array, e_len_array) = load_data()
+    (x_matrix, answer_array) = load_data()
 
     new_x = np.array(
         [[(n - 10) / 10, math.sqrt(m) / 4, eps * 5, math.sqrt(avg) / 8]],
         dtype=np.float64,
     )
 
-    pred_taboo, _, _, _, _ = predict_one(x_matrix, taboo_array, new_x, n_trials)
-    pred_taboo = math.exp(pred_taboo[0]) / (1 + math.exp(pred_taboo[0]))
-    pred_e_len, _, _, _, _ = predict_one(x_matrix, e_len_array, new_x, n_trials)
-    pred_e_len = pred_e_len**2
+    pred_answer, _, _, _, _ = predict_one(x_matrix, answer_array, new_x, n_trials)
+    pred_answer = pred_answer**2
 
-    return pred_taboo, pred_e_len[0]
+    return pred_answer[0]
 
 
 if __name__ == "__main__":
-    (x_matrix, taboo_array, e_len_array) = load_data()
+    (x_matrix, answer_array) = load_data()
 
     n = 20
     m = 15
@@ -177,19 +168,13 @@ if __name__ == "__main__":
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    print("=== taboo_prob ===")
-    pred_taboo, t1, t2, t3, t4 = predict_one(x_matrix, taboo_array, new_x)
-    pred_taboo = math.exp(pred_taboo[0]) / (1 + math.exp(pred_taboo[0]))
-    param_taboo = [t1, t2, t3, t4]
-    print("pred_taboo", pred_taboo)
+    print("=== answer_threshold ===")
+    pred_answer, t1, t2, t3, t4 = predict_one(x_matrix, answer_array, new_x)
+    pred_answer = pred_answer**2
+    param_answer = [t1, t2, t3, t4]
+    print("pred_answer", pred_answer)
 
-    print("=== entropy_len ===")
-    pred_e_len, t1, t2, t3, t4 = predict_one(x_matrix, e_len_array, new_x)
-    pred_e_len = pred_e_len**2
-    param_e_len = [t1, t2, t3, t4]
-    print("pred_e_len", pred_e_len)
-
-    PARAM_PATH = "data/params2.txt"
+    PARAM_PATH = "data/params3.txt"
 
     with open(PARAM_PATH, "w") as f:
         params = {}
@@ -201,17 +186,13 @@ if __name__ == "__main__":
         eps_vec = x_matrix[:, 2]
         avg_vec = x_matrix[:, 3]
 
-        f.write(f'const N2: &[u8] = b"{pack.pack_vec(n_vec)}";\n')
-        f.write(f'const M2: &[u8] = b"{pack.pack_vec(m_vec)}";\n')
-        f.write(f'const EPS2: &[u8] = b"{pack.pack_vec(eps_vec)}";\n')
-        f.write(f'const AVG2: &[u8] = b"{pack.pack_vec(avg_vec)}";\n')
+        f.write(f'const N3: &[u8] = b"{pack.pack_vec(n_vec)}";\n')
+        f.write(f'const M3: &[u8] = b"{pack.pack_vec(m_vec)}";\n')
+        f.write(f'const EPS3: &[u8] = b"{pack.pack_vec(eps_vec)}";\n')
+        f.write(f'const AVG3: &[u8] = b"{pack.pack_vec(avg_vec)}";\n')
 
-        f.write(f'const TABOO: &[u8] = b"{pack.pack_vec(taboo_array)}";\n')
-        f.write(f'const ENTROPY_LEN: &[u8] = b"{pack.pack_vec(e_len_array)}";\n')
+        f.write(f'const ANSWER: &[u8] = b"{pack.pack_vec(answer_array)}";\n')
 
         f.write(
-            f'const PARAM_TABOO: &[u8] = b"{pack.pack_vec(np.array(param_taboo, dtype=np.float64))}";\n'
-        )
-        f.write(
-            f'const PARAM_ENTROPY_LEN: &[u8] = b"{pack.pack_vec(np.array(param_e_len, dtype=np.float64))}";\n'
+            f'const PARAM_ANSWER: &[u8] = b"{pack.pack_vec(np.array(param_answer, dtype=np.float64))}";\n'
         )
