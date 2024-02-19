@@ -232,8 +232,6 @@ struct Env<'a> {
 }
 
 impl<'a> Env<'a> {
-    const MAX_STATE_COUNT: usize = 50;
-
     fn new(
         input: &'a Input,
         mut states: Vec<generator::State>,
@@ -245,9 +243,9 @@ impl<'a> Env<'a> {
 
         states.sort_unstable_by_key(|s| Reverse(OrderedFloat(s.log_likelihood)));
 
-        // 適当に尤度の大きい上位MAX_STATE_COUNT個を選ぶ
-        if states.len() > Self::MAX_STATE_COUNT {
-            states.truncate(Self::MAX_STATE_COUNT);
+        // 適当に尤度の大きい上位max_entropy_len個を選ぶ
+        if states.len() > input.params.max_entropy_len {
+            states.truncate(input.params.max_entropy_len);
         }
 
         // 確率計算に支障のない範囲でさらにstateの個数を絞る
@@ -649,7 +647,7 @@ fn annealing(
 
     loop {
         all_iter += 1;
-        
+
         let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
 
         if time >= 1.0 {

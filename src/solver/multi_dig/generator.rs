@@ -172,8 +172,9 @@ impl State {
             .iter()
             .map(|c| {
                 let len = c.len();
-                let ratio = rng.gen_range(0.3..=1.0);
-                let cand_ren = ((len as f64 * ratio * ratio).ceil() as usize)
+                let ratio = rng.gen_range(env.input.params.min_cut..=1.0);
+                let cand_ren = ((len as f64 * ratio.powf(env.input.params.min_cut_pow)).ceil()
+                    as usize)
                     .max(5)
                     .min(len);
                 cand_ren
@@ -184,7 +185,7 @@ impl State {
         let last_shifts = self.shift.clone();
         let mut taboos = vec![false; env.input.oil_count];
 
-        if rng.gen_bool(0.5) {
+        if rng.gen_bool(env.input.params.taboo_prob) {
             let taboo = oil_indices.choose(rng).copied().unwrap();
             if env.obs.shift_candidates[taboo].len() > 1 {
                 taboos[taboo] = true;

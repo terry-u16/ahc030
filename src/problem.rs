@@ -130,10 +130,15 @@ impl Display for Oils {
 #[derive(Debug, Clone)]
 pub struct Params {
     pub use_multi_dig_solver: f64,
+    pub min_cut: f64,
+    pub min_cut_pow: f64,
+    pub taboo_prob: f64,
+    pub max_entropy_len: usize,
 }
 
 impl Params {
     pub fn new(map_size: usize, oil_count: usize, eps: f64, avg: f64) -> Self {
+        /*
         let use_multi_dig_solver = match std::env::args().nth(1) {
             Some(s) => {
                 if s == "1" {
@@ -144,9 +149,34 @@ impl Params {
             }
             None => ParamSuggester::gen_multi_pred().suggest(map_size, oil_count, eps, avg),
         };
+        */
+
+        let use_multi_dig_solver =
+            ParamSuggester::gen_multi_pred().suggest(map_size, oil_count, eps, avg);
+
+        let min_cut = std::env::args()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.3);
+        let min_cut_pow = std::env::args()
+            .nth(2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2.0);
+        let taboo_prob = std::env::args()
+            .nth(3)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.5);
+        let max_entropy_len = std::env::args()
+            .nth(4)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(50);
 
         Self {
             use_multi_dig_solver,
+            min_cut,
+            min_cut_pow,
+            taboo_prob,
+            max_entropy_len,
         }
     }
 
@@ -165,6 +195,7 @@ pub struct TimeConductor {
 impl TimeConductor {
     fn new(map_size: usize, oil_count: usize, eps: f64, avg: f64) -> Self {
         // ターンごとの実行時間は (1-x)^k + bx とする
+        /*
         let k = std::env::args()
             .nth(2)
             .and_then(|s| s.parse().ok())
@@ -179,6 +210,11 @@ impl TimeConductor {
             .nth(4)
             .and_then(|s| s.parse().ok())
             .unwrap_or_else(|| ParamSuggester::gen_r_pred().suggest(map_size, oil_count, eps, avg));
+        */
+
+        let k = ParamSuggester::gen_k_pred().suggest(map_size, oil_count, eps, avg);
+        let b = ParamSuggester::gen_b_pred().suggest(map_size, oil_count, eps, avg);
+        let ratio = ParamSuggester::gen_r_pred().suggest(map_size, oil_count, eps, avg);
 
         Self { k, b, ratio }
     }
