@@ -64,7 +64,20 @@ pub(super) fn select_sample_points(
     }
 
     let state = State::new(&env, &sampled_coords);
-    let state = annealing(&env, state, prob_table, duration, rng);
+    let mut state = annealing(&env, state, prob_table, duration, rng);
+
+    let map = match search_single_sample(&env) {
+        Some((c, score)) => {
+            if state.calc_score(&env, prob_table) < score {
+                let mut map = Map2d::new_with(false, input.map_size);
+                map[c] = true;
+                map
+            } else {
+                state.map
+            }
+        }
+        None => state.map,
+    };
 
     let mut result = vec![];
 
@@ -72,7 +85,7 @@ pub(super) fn select_sample_points(
         for col in 0..input.map_size {
             let c = Coord::new(row, col);
 
-            if state.map[c] {
+            if map[c] {
                 result.push(c);
             }
         }
@@ -687,4 +700,78 @@ fn annealing(
     );
 
     best_solution
+}
+
+fn search_single_sample(env: &Env) -> Option<(Coord, f64)> {
+    let mut maps = vec![];
+    let sample_count = env.states.len();
+
+    for state in env.states.iter() {
+        let mut map = Map2d::new_with(0, env.input.map_size);
+
+        for (&shift, oil) in state.shift.iter().zip(env.input.oils.iter()) {
+            for &p in oil.pos.iter() {
+                let p = p + shift;
+
+                map[p] += 1;
+            }
+        }
+
+        maps.push(map);
+    }
+
+    let max_v = maps
+        .iter()
+        .flat_map(|m| m.iter())
+        .max()
+        .copied()
+        .unwrap_or(0) as usize;
+
+    let mut counts = Map2d::new_with(vec![0; max_v + 1], env.input.map_size);
+
+    for map in maps.iter() {
+        for (&m, cnt) in map.iter().zip(counts.iter_mut()) {
+            cnt[m as usize] += 1;
+        }
+    }
+
+    // log2のテーブルを作成
+    // p log p はp=1のとき0になるため、適当な値を入れてよい
+    let log_table = (0..=sample_count)
+        .map(|v| (1.0 / v.max(1) as f64).log2())
+        .collect::<Vec<_>>();
+
+    let mut best_pos = None;
+    let mut best_entropy = f64::INFINITY;
+    let sample_count_inv = 1.0 / sample_count as f64;
+
+    for row in 0..env.input.map_size {
+        for col in 0..env.input.map_size {
+            let c = Coord::new(row, col);
+
+            //if env.map[c].is_some() {
+            //    continue;
+            //}
+
+            // エントロピーを計算し、最小となる箇所（相互情報量が最大となる箇所）を選ぶ
+            let mut entropy = 0.0;
+
+            for &c in counts[c].iter() {
+                // H(配置|観測値) = Σ_i p(観測値=i)H(配置|観測値=i)
+                //               = Σ_i p(観測値=i) log(n(配置|観測値=i))
+                let p = c as f64 * sample_count_inv;
+                entropy -= p * log_table[c];
+
+                if entropy > best_entropy {
+                    break;
+                }
+            }
+
+            if best_entropy.change_min(entropy) {
+                best_pos = Some(c);
+            }
+        }
+    }
+
+    best_pos.map(|c| (c, env.base_entropy - best_entropy))
 }

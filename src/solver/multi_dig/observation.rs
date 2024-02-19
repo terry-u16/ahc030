@@ -175,8 +175,13 @@ impl Observation {
 
             for true_v in 0..likelihoods_len {
                 let v = true_v as f64;
-                let mean = (k - v) * input.eps + v * (1.0 - input.eps);
-                let variance = k * input.eps * (1.0 - input.eps);
+                let (mean, variance) = if pos.len() == 1 {
+                    (v as f64, 1e-5)
+                } else {
+                    let mean = (k - v) * input.eps + v * (1.0 - input.eps);
+                    let variance = k * input.eps * (1.0 - input.eps);
+                    (mean, variance)
+                };
                 let std_dev = variance.sqrt();
                 let gauss = GaussianDistribution::new(mean, std_dev);
 
