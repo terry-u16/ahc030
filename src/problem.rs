@@ -170,11 +170,16 @@ impl Params {
         let taboo_prob = std::env::args()
             .nth(1)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0.5);
+            .unwrap_or_else(|| {
+                ParamSuggester::gen_taboo_pred().suggest(map_size, oil_count, eps, avg)
+            });
         let max_entropy_len = std::env::args()
             .nth(2)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(50);
+            .unwrap_or_else(|| {
+                ParamSuggester::gen_entropy_len_pred().suggest(map_size, oil_count, eps, avg)
+            })
+            .round() as usize;
 
         Self {
             use_multi_dig_solver,
