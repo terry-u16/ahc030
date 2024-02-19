@@ -348,6 +348,7 @@ pub(super) fn generate_states(
     let since = std::time::Instant::now();
 
     let oil_count_dist = WeightedAliasIndex::new(vec![0, 0, 60, 20, 10, 5]).unwrap();
+    let mut next_state = None;
 
     loop {
         let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
@@ -359,13 +360,27 @@ pub(super) fn generate_states(
         all_iter += 1;
 
         // 変形
-        let x = rng.gen_range(0.0..prefix_prob.last().unwrap().0);
-        let index = prefix_prob
-            .binary_search(&OrderedFloat(x))
-            .unwrap_or_else(|x| x);
-        let state = states[index].clone();
+        let state = next_state.take().unwrap_or_else(|| {
+            let x = rng.gen_range(0.0..prefix_prob.last().unwrap().0);
+            let index = prefix_prob
+                .binary_search(&OrderedFloat(x))
+                .unwrap_or_else(|x| x);
+            let state = states[index].clone();
+            state
+        });
+        let state_hash = state.hash;
+        let prev_log_likelihood = state.log_likelihood;
         let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
         let new_state = state.neigh(env, rng, oil_count);
+
+        if new_state.hash != state_hash
+            && (new_state.log_likelihood >= prev_log_likelihood
+                || rng.gen_bool((new_state.log_likelihood - prev_log_likelihood).exp()))
+        {
+            next_state = Some(new_state.clone());
+        } else {
+            next_state = None;
+        }
 
         if hashes.insert(new_state.hash) {
             // 凄く大きな値を引いてしまうとオーバーフローする可能性があるため注意
