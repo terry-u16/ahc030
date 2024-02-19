@@ -145,8 +145,6 @@ impl Display for Oils {
 #[derive(Debug, Clone)]
 pub struct Params {
     pub use_multi_dig_solver: f64,
-    pub min_cut: f64,
-    pub min_cut_pow: f64,
     pub taboo_prob: f64,
     pub max_entropy_len: usize,
 }
@@ -169,27 +167,17 @@ impl Params {
         let use_multi_dig_solver =
             ParamSuggester::gen_multi_pred().suggest(map_size, oil_count, eps, avg);
 
-        let min_cut = std::env::args()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0.3);
-        let min_cut_pow = std::env::args()
-            .nth(2)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2.0);
         let taboo_prob = std::env::args()
-            .nth(3)
+            .nth(1)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.5);
         let max_entropy_len = std::env::args()
-            .nth(4)
+            .nth(2)
             .and_then(|s| s.parse().ok())
             .unwrap_or(50);
 
         Self {
             use_multi_dig_solver,
-            min_cut,
-            min_cut_pow,
             taboo_prob,
             max_entropy_len,
         }

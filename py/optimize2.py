@@ -14,8 +14,6 @@ class Objective:
         pass
 
     def __call__(self, trial: optuna.trial.Trial) -> float:
-        min_cut = trial.suggest_float("min_cut", 0.2, 1.0, log=False)
-        min_cut_pow = trial.suggest_float("min_cut_pow", 0.5, 2.0, log=True)
         taboo_prob = trial.suggest_float("taboo_prob", 0.0, 1.0, log=False)
         max_entropy_len = trial.suggest_int("max_entropy_len", 20, 500, log=True)
 
@@ -24,7 +22,7 @@ class Objective:
         batch_size = 64
         step = 0
         score_sum = 0.0
-        args = f"{min_cut} {min_cut_pow} {taboo_prob} {max_entropy_len}"
+        args = f"{taboo_prob} {max_entropy_len}"
         local_execution = f"tester.exe ahc030.exe {args}"
         cloud_execution = f"tester main {args}"
         print(f">> {local_execution}")

@@ -166,21 +166,6 @@ impl State {
         let mut oil_indices = (0..env.input.oil_count).choose_multiple(rng, choose_cnt);
         oil_indices.shuffle(rng);
 
-        let cand_lens = env
-            .obs
-            .shift_candidates
-            .iter()
-            .map(|c| {
-                let len = c.len();
-                let ratio = rng.gen_range(env.input.params.min_cut..=1.0);
-                let cand_ren = ((len as f64 * ratio.powf(env.input.params.min_cut_pow)).ceil()
-                    as usize)
-                    .max(5)
-                    .min(len);
-                cand_ren
-            })
-            .collect_vec();
-
         // 同じ場所への配置を許可しない
         let last_shifts = self.shift.clone();
         let mut taboos = vec![false; env.input.oil_count];
@@ -196,7 +181,7 @@ impl State {
             self.remove_oil(env, oil_i);
 
             // 消したままだと貪欲の判断基準がおかしくなるので、ランダムな適当な場所に置いておく
-            let shift = env.obs.shift_candidates[oil_i][..cand_lens[oil_i]]
+            let shift = env.obs.shift_candidates[oil_i]
                 .choose(rng)
                 .copied()
                 .unwrap();
@@ -215,7 +200,7 @@ impl State {
             // 消し直す
             self.remove_oil(env, oil_i);
 
-            for &shift in env.obs.shift_candidates[oil_i][..cand_lens[oil_i]].iter() {
+            for &shift in env.obs.shift_candidates[oil_i].iter() {
                 // 同じ場所への配置を許可しない
                 if taboos[oil_i] && shift == last_shifts[oil_i] {
                     continue;

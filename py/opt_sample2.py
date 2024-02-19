@@ -59,8 +59,6 @@ for iteration in range(1, 10000):
 
     study.enqueue_trial(
         {
-            "min_cut": 0.3,
-            "min_cut_pow": 2.0,
             "taboo_prob": 0.5,
             "max_entropy_len": 50,
         }
