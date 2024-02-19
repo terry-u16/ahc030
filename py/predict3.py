@@ -154,10 +154,10 @@ def predict(
 if __name__ == "__main__":
     (x_matrix, answer_array) = load_data()
 
-    n = 20
-    m = 15
-    eps = 0.2
-    avg = 10
+    n = 10
+    m = 2
+    eps = 0.05
+    avg = 20
 
     print(f"n={n}, m={m}, eps={eps}, avg={avg}")
 

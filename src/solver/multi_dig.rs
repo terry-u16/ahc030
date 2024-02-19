@@ -101,11 +101,11 @@ impl<'a> Solver for MultiDigSolver<'a> {
                 .map(|s| s.log_likelihood)
                 .fold(f64::MIN, f64::max);
 
-            let retain_threshold = answer_threshold_ratio.ln();
+            let answer_threshold_ln = answer_threshold_ratio.ln();
 
             let mut likelihoods = states
                 .iter()
-                .filter(|s| max_log_likelihood - s.log_likelihood <= retain_threshold)
+                .filter(|s| max_log_likelihood - s.log_likelihood <= answer_threshold_ln)
                 .group_by(|s| {
                     let mut map = BitSet::new(input.map_size * input.map_size);
                     for i in 0..input.oil_count {

@@ -36,7 +36,7 @@ pub struct Input {
 }
 
 impl Input {
-    pub const TIME_LIMIT: Duration = Duration::new(2, 950_000_000);
+    pub const TIME_LIMIT: Duration = Duration::new(2, 970_000_000);
 
     fn new(map_size: usize, oil_count: usize, eps: f64, oils: Vec<Oils>) -> Self {
         let mut counts = HashMap::new();

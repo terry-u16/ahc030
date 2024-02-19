@@ -57,7 +57,7 @@ for iteration in range(1, 10000):
         }
     )
 
-    timeout = 120
+    timeout = 90
 
     study.optimize(objective, timeout=timeout)
 
