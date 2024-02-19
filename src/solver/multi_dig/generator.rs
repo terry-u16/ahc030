@@ -370,9 +370,10 @@ pub(super) fn generate_states(
         if hashes.insert(new_state.hash) {
             // 凄く大きな値を引いてしまうとオーバーフローする可能性があるため注意
             // 適切にサンプリングできればよいので、重みは適当に上限を設ける
-            let mut p = (new_state.log_likelihood - base_log_likelihood).exp()
+            let p = (new_state.log_likelihood - base_log_likelihood)
+                .exp()
+                .min(1e200)
                 + prefix_prob.last().unwrap().0;
-            p.change_min(1e200);
             prefix_prob.push(OrderedFloat(p));
             states.push(new_state);
 
