@@ -59,7 +59,7 @@ impl<'a> Solver for MultiDigSolver<'a> {
             self.judge.max_query_count(),
         );
 
-        const ANSWER_THRESHOLD_RATIO: f64 = 20.0;
+        let answer_threshold_ratio = input.params.answer_threshold_ratio;
         const RETAIN_THRESHOLD_RATIO: f64 = 100.0;
 
         while self.judge.can_query() {
@@ -101,7 +101,7 @@ impl<'a> Solver for MultiDigSolver<'a> {
                 .map(|s| s.log_likelihood)
                 .fold(f64::MIN, f64::max);
 
-            let retain_threshold = ANSWER_THRESHOLD_RATIO.ln();
+            let retain_threshold = answer_threshold_ratio.ln();
 
             let mut likelihoods = states
                 .iter()
@@ -154,7 +154,7 @@ impl<'a> Solver for MultiDigSolver<'a> {
 
             self.judge.comment_colors(&map);
 
-            if ratio >= ANSWER_THRESHOLD_RATIO {
+            if ratio >= answer_threshold_ratio {
                 let state = states.iter().find(|s| s.hash == likelihoods[0].1).unwrap();
 
                 if self.judge.answer(&state.to_answer(input)).is_ok() {

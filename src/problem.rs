@@ -175,7 +175,9 @@ impl Params {
         let answer_threshold_ratio = std::env::args()
             .nth(1)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(30.0);
+            .unwrap_or_else(|| {
+                ParamSuggester::gen_answer_threshold_pred().suggest(map_size, oil_count, eps, avg)
+            });
 
         Self {
             use_multi_dig_solver,

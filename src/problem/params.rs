@@ -24,6 +24,14 @@ const ENTROPY_LEN: &[u8] = b"/O5jaTPVKkC0uD1pQegqQFqdKgCqWiVAL6TjXG27LUAjuXGCEsY
 const PARAM_TABOO: &[u8] = b"1CzxLdPSkz/dEoBpRzn2P6bJtg6xvZU/j/BK4GuXEEA=";
 const PARAM_ENTROPY_LEN: &[u8] = b"MYOjtt/qhz+qdYAoiFCaP/0Ucx+5iKQ/dURErWFFN0A=";
 
+// 第3回パラメータ調整分
+const N3: &[u8] = b"AAAAAAAA8D9mZmZmZmbmPwAAAAAAAOA/MzMzMzMz0z9mZmZmZmbmPwAAAAAAAOA/ZmZmZmZm5j8AAAAAAADgPzMzMzMzM9M/mpmZmZmZuT9mZmZmZmbmPwAAAAAAAAAAzczMzMzM7D8AAAAAAAAAAJqZmZmZmek/mpmZmZmZ6T8AAAAAAADwP2ZmZmZmZuY/AAAAAAAAAAAzMzMzMzPjPwAAAAAAAAAAAAAAAAAAAACamZmZmZnJPw==";
+const M3: &[u8] = b"+U1kNINv8T80b/2TcojqP6pMWOh6tts/AAAAAAAA4D8uIQkUjpjjP6pMWOh6tts/U1vaOlhM6T80b/2TcojqP6pMWOh6tts/qkxY6Hq22z9TW9o6WEzpP6j0l5t34+E/AAAAAAAA6D+o9Jebd+PhP6pMWOh6tus/qkxY6Hq26z/NO39mnqDmP807f2aeoNY/AAAAAAAA4D+qTFjoerbbP6j0l5t34+E/zTt/Zp6g1j+qTFjoerbbPw==";
+const EPS3: &[u8] = b"Z2ZmZmZm1j8AAAAAAADQP5qZmZmZmdk/AAAAAAAA8D/NzMzMzMzkP2ZmZmZmZu4/mpmZmZmZ6T+amZmZmZmpP83MzMzMzOQ/zMzMzMzM3D8zMzMzMzPTPzQzMzMzM+s/MzMzMzMz0z/MzMzMzMzcP2dmZmZmZuY/AAAAAAAA4D8zMzMzMzPTPwAAAAAAAOg/mpmZmZmZyT8zMzMzMzPDPwAAAAAAANA/mpmZmZmZuT/NzMzMzMzkPw==";
+const AVG3: &[u8] = b"AAAAAAAA2D8uIQkUjpjTP4UeFbmOVOI/qPSXm3fj4T8uIQkUjpjjP9ls38x2+OA/LiEJFI6Y0z8AAAAAAADYPy4hCRSOmOM/qPSXm3fj4T80b/2TcojaP+r40ql/KtU/ST9oEeru3T8uIQkUjpjTP6j0l5t349E/81lhRCvY3D8WBHd17i7jP/PZqKRoiuU/zTt/Zp6g1j/ZbN/MdvjgP807f2aeoNY/U1vaOlhM2T+o9Jebd+PhPw==";
+const ANSWER: &[u8] = b"0A7v+mlTEUBgZPJEg5gUQLKOXurmCCJA2n6Ot7X9IkDM5ksEphIXQKljq4rR3yNAtu9IPqtnIkCUxN9HPV0gQOG/oO0qQxZAxW6tSeh7I0B2OuWefYcaQKfHWHdbTyBAwAofAMZIHEDZVwXWAkIgQC/4DldBMSFAwAofAMZIHEBW28ChgiQWQDc0M+RwSiNAwAofAMZIHEBqmDwOooQWQFN8qkhEkRJAdhVeKeoHEkDSCVP9VjQSQA==";
+const PARAM_ANSWER: &[u8] = b"JWSc+Nnzhj9IeM76Ecv7P551+OvvvpY/ycqNkbWb/D8=";
+
 pub struct ParamSuggester {
     x_matrix: DMatrix<f64>,
     y_vector: DVector<f64>,
@@ -68,6 +76,17 @@ impl ParamSuggester {
         let m = DVector::from_vec(decode_base64(M2)).transpose();
         let eps = DVector::from_vec(decode_base64(EPS2)).transpose();
         let avg = DVector::from_vec(decode_base64(AVG2)).transpose();
+
+        let x_matrix = DMatrix::from_rows(&[n, m, eps, avg]);
+
+        x_matrix
+    }
+
+    fn gen_x_matrix_3() -> DMatrix<f64> {
+        let n = DVector::from_vec(decode_base64(N3)).transpose();
+        let m = DVector::from_vec(decode_base64(M3)).transpose();
+        let eps = DVector::from_vec(decode_base64(EPS3)).transpose();
+        let avg = DVector::from_vec(decode_base64(AVG3)).transpose();
 
         let x_matrix = DMatrix::from_rows(&[n, m, eps, avg]);
 
@@ -149,6 +168,19 @@ impl ParamSuggester {
             |x| x * x,
             20.0,
             500.0,
+        )
+    }
+
+    pub fn gen_answer_threshold_pred() -> Self {
+        let hyper_param = DVector::from_vec(decode_base64(PARAM_ANSWER));
+        let y_vector = DVector::from_vec(decode_base64(ANSWER));
+        Self::new(
+            hyper_param,
+            Self::gen_x_matrix_3(),
+            y_vector,
+            |x| x * x,
+            20.0,
+            100.0,
         )
     }
 
