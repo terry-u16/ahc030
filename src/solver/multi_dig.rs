@@ -7,10 +7,13 @@ use crate::{
     problem::{Input, Judge},
     solver::multi_dig::{generator::State, observation::Observation, sampler::ProbTable},
 };
+use bitset_fixed::BitSet;
+use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use rand::seq::SliceRandom;
 use rand_core::SeedableRng;
 use rand_pcg::Pcg64Mcg;
-use std::vec;
+use std::{cmp::Reverse, vec};
 
 use self::observation::ObservationManager;
 
@@ -92,17 +95,43 @@ impl<'a> Solver for MultiDigSolver<'a> {
             states
                 .sort_unstable_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
 
+            let mut likelihoods = states
+                .iter()
+                .group_by(|s| {
+                    let mut map = BitSet::new(input.map_size * input.map_size);
+                    for i in 0..input.oil_count {
+                        map |= &input.oils[i].get_shifted_bitset(input, s.shift[i]);
+                    }
+                    map
+                })
+                .into_iter()
+                .map(|(_, ss)| {
+                    let mut likelihood = 0.0;
+                    let mut hash = None;
+
+                    for p in ss.into_iter() {
+                        likelihood += (p.log_likelihood - states[0].log_likelihood).exp();
+                        if hash.is_none() {
+                            hash = Some(p.hash);
+                        }
+                    }
+
+                    (likelihood, hash.unwrap())
+                })
+                .collect_vec();
+            likelihoods.sort_unstable_by_key(|(likelihood, _)| Reverse(OrderedFloat(*likelihood)));
+
             let state = &states[0];
-            let ratio = if states.len() >= 2 {
-                (state.log_likelihood - states[1].log_likelihood).exp()
+            let ratio = if likelihoods.len() >= 2 {
+                likelihoods[0].0 / likelihoods[1].0
             } else {
                 f64::INFINITY
             };
 
             self.judge.comment(&format!(
                 "found: {} log_likelihood: {:.3}, ratio: {:.3}",
-                states.len(),
-                state.log_likelihood,
+                likelihoods.len(),
+                likelihoods[0].0,
                 ratio
             ));
 
@@ -117,6 +146,8 @@ impl<'a> Solver for MultiDigSolver<'a> {
             self.judge.comment_colors(&map);
 
             if ratio >= ANSWER_THRESHOLD_RATIO {
+                let state = states.iter().find(|s| s.hash == likelihoods[0].1).unwrap();
+
                 if self.judge.answer(&state.to_answer(input)).is_ok() {
                     return;
                 }

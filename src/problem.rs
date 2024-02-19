@@ -2,8 +2,9 @@ pub mod params;
 
 use crate::{
     common::DurationCorrector,
-    grid::{Coord, Map2d},
+    grid::{Coord, CoordDiff, Map2d},
 };
+use bitset_fixed::BitSet;
 use im_rc::HashMap;
 use itertools::Itertools;
 use proconio::{input, source::line::LineSource};
@@ -89,21 +90,35 @@ pub struct Oils {
     pub width: usize,
     pub height: usize,
     pub len: usize,
+    pub bitset: BitSet,
 }
 
 impl Oils {
-    fn new(mut pos: Vec<Coord>) -> Self {
+    fn new(mut pos: Vec<Coord>, map_size: usize) -> Self {
         pos.sort();
         let height = pos.iter().map(|c| c.row).max().unwrap() + 1;
         let width = pos.iter().map(|c| c.col).max().unwrap() + 1;
         let len = pos.len();
+
+        let mut bitset = BitSet::new(map_size * map_size);
+
+        for p in &pos {
+            bitset.set(p.row * map_size + p.col, true);
+        }
 
         Self {
             pos,
             width,
             height,
             len,
+            bitset,
         }
+    }
+
+    pub fn get_shifted_bitset(&self, input: &Input, shift: CoordDiff) -> BitSet {
+        let result =
+            self.bitset.clone() << (shift.dr as usize * input.map_size + shift.dc as usize);
+        result
     }
 }
 
@@ -325,7 +340,7 @@ impl<'a> Judge<'a> {
                 pos.push(Coord::new(row, col));
             }
 
-            oils.push(Oils::new(pos));
+            oils.push(Oils::new(pos, n));
         }
 
         oils.sort_by_key(|o| Reverse(o.len));

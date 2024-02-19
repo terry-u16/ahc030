@@ -21,7 +21,7 @@ pub(super) struct State {
     pub log_likelihood: f64,
     counts: Vec<usize>,
     counts_u32: Vec<u32>,
-    hash: u64,
+    pub hash: u64,
 }
 
 impl State {
