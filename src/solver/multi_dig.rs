@@ -95,8 +95,16 @@ impl<'a> Solver for MultiDigSolver<'a> {
             states
                 .sort_unstable_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
 
+            let max_log_likelihood = states
+                .iter()
+                .map(|s| s.log_likelihood)
+                .fold(f64::MIN, f64::max);
+
+            let retain_threshold = ANSWER_THRESHOLD_RATIO.ln();
+
             let mut likelihoods = states
                 .iter()
+                .filter(|s| max_log_likelihood - s.log_likelihood <= retain_threshold)
                 .group_by(|s| {
                     let mut map = BitSet::new(input.map_size * input.map_size);
                     for i in 0..input.oil_count {
