@@ -205,12 +205,64 @@ impl<'a> Solver for MultiDigSolver<'a> {
 struct Env<'a> {
     input: &'a Input,
     obs: ObservationManager,
+    swap_candidates: Vec<Vec<Vec<CoordDiff>>>,
 }
 
 impl<'a> Env<'a> {
     fn new(input: &'a Input) -> Self {
         let obs = ObservationManager::new(input);
+        let swap_candidates = Self::calc_swaps(input);
 
-        Self { input, obs }
+        Self {
+            input,
+            obs,
+            swap_candidates,
+        }
+    }
+
+    fn calc_swaps(input: &Input) -> Vec<Vec<Vec<CoordDiff>>> {
+        let mut swaps = vec![vec![vec![]; input.oil_count]; input.oil_count];
+
+        for oil_i in 0..input.oil_count {
+            let mut map = Map2d::new_with(false, input.map_size);
+
+            let oil0 = &input.oils[oil_i];
+
+            for p in oil0.pos.iter() {
+                map[*p] = true;
+            }
+
+            for oil_j in 0..input.oil_count {
+                if oil_i == oil_j {
+                    continue;
+                }
+
+                let mut candidates = vec![];
+                let oil1 = &input.oils[oil_j];
+
+                for dr in -(oil1.height as isize)..=oil1.height as isize {
+                    for dc in -(oil1.width as isize)..=oil1.width as isize {
+                        let diff = CoordDiff::new(dr, dc);
+                        let mut count = 0;
+
+                        for p in oil1.pos.iter() {
+                            let q = *p + diff;
+
+                            if q.in_map(input.map_size) && map[q] {
+                                count += 1;
+                            }
+                        }
+
+                        candidates.push((count, diff));
+                    }
+                }
+
+                candidates.sort_unstable_by_key(|(count, _)| Reverse(*count));
+                candidates.truncate(4);
+                swaps[oil_i][oil_j] = candidates.into_iter().map(|(_, diff)| diff).collect();
+            }
+        }
+
+        swaps
     }
 }

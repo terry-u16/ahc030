@@ -1,6 +1,6 @@
 use crate::{
     common::ChangeMinMax as _,
-    grid::{Coord, CoordDiff, Map2d},
+    grid::{Coord, CoordDiff, Map2d, ADJACENTS},
     problem::Input,
 };
 use itertools::{izip, Itertools as _};
@@ -11,7 +11,7 @@ use rand::{
 };
 use rand_distr::{Distribution as _, WeightedAliasIndex, WeightedIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::hash::Hash;
+use std::{cmp::Reverse, hash::Hash};
 
 use super::Env;
 
@@ -318,27 +318,22 @@ pub(super) fn generate_states(
     duration: f64,
     rng: &mut impl Rng,
 ) -> Vec<State> {
+    if duration <= 0.0 {
+        return states;
+    }
+
     let mut hashes = FxHashSet::default();
 
     for state in states.iter() {
         hashes.insert(state.hash);
     }
 
-    let base_log_likelihood = states
+    let mut state = states
         .iter()
-        .map(|s| s.log_likelihood)
-        .fold(f64::MIN, f64::max);
-
-    let mut prefix_prob = vec![OrderedFloat(
-        (states[0].log_likelihood - base_log_likelihood).exp(),
-    )];
-
-    for i in 1..states.len() {
-        let p = OrderedFloat(
-            (states[i].log_likelihood - base_log_likelihood).exp() + prefix_prob[i - 1].0,
-        );
-        prefix_prob.push(p);
-    }
+        .max_by_key(|s| OrderedFloat(s.log_likelihood))
+        .unwrap()
+        .clone();
+    let mut best_score = state.log_likelihood;
 
     let mut all_iter = 0;
     let mut valid_iter = 0;
@@ -347,36 +342,47 @@ pub(super) fn generate_states(
     let duration_inv = 1.0 / duration;
     let since = std::time::Instant::now();
 
-    let oil_count_dist = WeightedAliasIndex::new(vec![0, 0, 60, 20, 10, 5]).unwrap();
+    let temp0 = 2.0;
+    let temp1 = 1.0;
+    let mut inv_temp = 1.0 / temp0;
 
     loop {
-        let time = env.input.duration_corrector.elapsed(since).as_secs_f64() * duration_inv;
+        if (all_iter & ((1 << 4) - 1)) == 0 {
+            let time = (std::time::Instant::now() - since).as_secs_f64() * duration_inv;
+            let temp = f64::powf(temp0, 1.0 - time) * f64::powf(temp1, time);
+            inv_temp = 1.0 / temp;
 
-        if time >= 1.0 {
-            break;
+            if time >= 1.0 {
+                break;
+            }
         }
 
         all_iter += 1;
 
+        let prev_score = state.log_likelihood;
+
         // 変形
-        let x = rng.gen_range(0.0..prefix_prob.last().unwrap().0);
-        let index = prefix_prob
-            .binary_search(&OrderedFloat(x))
-            .unwrap_or_else(|x| x);
-        let state = states[index].clone();
-        let oil_count = oil_count_dist.sample(rng).min(env.input.oil_count);
-        let new_state = state.neigh(env, rng, oil_count);
+        let Some(neigh) = (match rng.gen_range(0..10) {
+            0..=3 => ShiftNeigh::gen(env, &state, rng),
+            4..=7 => MoveNeigh::gen(env, &state, rng),
+            _ => SwapNeigh::gen(env, &state, rng),
+        }) else {
+            continue;
+        };
 
-        if hashes.insert(new_state.hash) {
-            // 凄く大きな値を引いてしまうとオーバーフローする可能性があるため注意
-            // 適切にサンプリングできればよいので、重みは適当に上限を設ける
-            let mut p = (new_state.log_likelihood - base_log_likelihood).exp()
-                + prefix_prob.last().unwrap().0;
-            p.change_min(1e200);
-            prefix_prob.push(OrderedFloat(p));
-            states.push(new_state);
+        neigh.apply(env, &mut state);
 
+        let score_diff = state.log_likelihood - prev_score;
+
+        if state.log_likelihood - best_score >= -10.0 && hashes.insert(state.hash) {
+            states.push(state.clone());
+        }
+
+        if score_diff >= 0.0 || rng.gen_bool(f64::exp(score_diff as f64 * inv_temp)) {
             accepted_count += 1;
+            best_score.change_max(state.log_likelihood);
+        } else {
+            neigh.rollback(env, &mut state);
         }
 
         valid_iter += 1;
@@ -387,5 +393,164 @@ pub(super) fn generate_states(
         all_iter, valid_iter, accepted_count
     );
 
+    states.sort_unstable_by_key(|s| Reverse(OrderedFloat(s.log_likelihood)));
+
+    if states.len() > 5000 {
+        states.truncate(5000);
+    }
+
     states
+}
+
+trait Neigh {
+    fn apply(&self, env: &Env, state: &mut State);
+
+    fn rollback(&self, env: &Env, state: &mut State);
+}
+
+struct ShiftNeigh {
+    oil_i: usize,
+    old_shift: CoordDiff,
+    new_shift: CoordDiff,
+}
+
+impl ShiftNeigh {
+    fn gen(env: &Env, state: &State, rng: &mut impl Rng) -> Option<Box<dyn Neigh>> {
+        let oil_i = rng.gen_range(0..env.input.oil_count);
+        let shift = ADJACENTS.choose(rng).copied().unwrap();
+
+        let next = state.shift[oil_i] + shift;
+
+        if next.dr >= 0
+            && next.dc >= 0
+            && env.input.oils[oil_i].height.wrapping_add_signed(next.dr) <= env.input.map_size
+            && env.input.oils[oil_i].width.wrapping_add_signed(next.dc) <= env.input.map_size
+        {
+            Some(Box::new(Self {
+                oil_i,
+                old_shift: state.shift[oil_i],
+                new_shift: next,
+            }))
+        } else {
+            None
+        }
+    }
+}
+
+impl Neigh for ShiftNeigh {
+    fn apply(&self, env: &Env, state: &mut State) {
+        state.remove_oil(env, self.oil_i);
+        state.add_oil(env, self.oil_i, self.new_shift);
+        state.normalize(&env.input);
+    }
+
+    fn rollback(&self, env: &Env, state: &mut State) {
+        state.remove_oil(env, self.oil_i);
+        state.add_oil(env, self.oil_i, self.old_shift);
+        state.normalize(&env.input);
+    }
+}
+
+struct MoveNeigh {
+    oil_i: usize,
+    old_shift: CoordDiff,
+    new_shift: CoordDiff,
+}
+
+impl MoveNeigh {
+    fn gen(env: &Env, state: &State, rng: &mut impl Rng) -> Option<Box<dyn Neigh>> {
+        let oil_i = rng.gen_range(0..env.input.oil_count);
+        let dr = rng.gen_range(0..=env.input.map_size - env.input.oils[oil_i].height);
+        let dc = rng.gen_range(0..=env.input.map_size - env.input.oils[oil_i].width);
+
+        Some(Box::new(Self {
+            oil_i,
+            old_shift: state.shift[oil_i],
+            new_shift: CoordDiff::new(dr as isize, dc as isize),
+        }))
+    }
+}
+
+impl Neigh for MoveNeigh {
+    fn apply(&self, env: &Env, state: &mut State) {
+        state.remove_oil(env, self.oil_i);
+        state.add_oil(env, self.oil_i, self.new_shift);
+        state.normalize(&env.input);
+    }
+
+    fn rollback(&self, env: &Env, state: &mut State) {
+        state.remove_oil(env, self.oil_i);
+        state.add_oil(env, self.oil_i, self.old_shift);
+        state.normalize(&env.input);
+    }
+}
+
+struct SwapNeigh {
+    oil0: usize,
+    oil1: usize,
+    old_shift0: CoordDiff,
+    new_shift0: CoordDiff,
+    old_shift1: CoordDiff,
+    new_shift1: CoordDiff,
+}
+
+impl SwapNeigh {
+    fn gen(env: &Env, state: &State, rng: &mut impl Rng) -> Option<Box<dyn Neigh>> {
+        let oil0 = rng.gen_range(0..env.input.oil_count);
+        let oil1 = rng.gen_range(0..env.input.oil_count);
+
+        if oil0 == oil1 {
+            return None;
+        }
+
+        let shift0 = state.shift[oil1]
+            + env.swap_candidates[oil1][oil0]
+                .choose(rng)
+                .copied()
+                .unwrap();
+        let shift1 = state.shift[oil0]
+            + env.swap_candidates[oil0][oil1]
+                .choose(rng)
+                .copied()
+                .unwrap();
+
+        if shift0.dr >= 0
+            && shift0.dc >= 0
+            && shift1.dr >= 0
+            && shift1.dc >= 0
+            && env.input.oils[oil0].height.wrapping_add_signed(shift0.dr) <= env.input.map_size
+            && env.input.oils[oil0].width.wrapping_add_signed(shift0.dc) <= env.input.map_size
+            && env.input.oils[oil1].height.wrapping_add_signed(shift1.dr) <= env.input.map_size
+            && env.input.oils[oil1].width.wrapping_add_signed(shift1.dc) <= env.input.map_size
+        {
+            Some(Box::new(Self {
+                oil0,
+                oil1,
+                old_shift0: state.shift[oil0],
+                new_shift0: shift0,
+                old_shift1: state.shift[oil1],
+                new_shift1: shift1,
+            }))
+        } else {
+            None
+        }
+    }
+}
+
+impl Neigh for SwapNeigh {
+    fn apply(&self, env: &Env, state: &mut State) {
+        state.remove_oil(env, self.oil0);
+        state.remove_oil(env, self.oil1);
+        state.add_oil(env, self.oil0, self.new_shift0);
+        state.add_oil(env, self.oil1, self.new_shift1);
+        state.normalize(&env.input);
+    }
+
+    fn rollback(&self, env: &Env, state: &mut State) {
+        state.remove_oil(env, self.oil0);
+        state.remove_oil(env, self.oil1);
+        state.add_oil(env, self.oil0, self.old_shift0);
+        state.add_oil(env, self.oil1, self.old_shift1);
+        state.normalize(&env.input);
+    }
 }
