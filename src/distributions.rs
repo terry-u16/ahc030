@@ -10,9 +10,7 @@ impl GaussianDistribution {
 
     /// 累積分布関数F(x)を計算する
     pub fn calc_cumulative_dist(&self, x: f64) -> f64 {
-        // ロジスティック近似する
-        let x = (x - self.mean) / self.std_dev;
-        1.0 / (1.0 + (-0.07056 * x * x * x - 1.5976 * x).exp())
+        0.5 * (1.0 + libm::erf((x - self.mean) / (self.std_dev * 1.41421356237)))
     }
 }
 
