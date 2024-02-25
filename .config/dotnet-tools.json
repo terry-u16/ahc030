@@ -3,9 +3,15 @@
   "isRoot": true,
   "tools": {
     "terryu16.marathonrunner.console": {
-      "version": "1.1.0",
+      "version": "2.0.0",
       "commands": [
         "marathon"
+      ]
+    },
+    "terryu16.rustexpander": {
+      "version": "1.0.4",
+      "commands": [
+        "expander-rs"
       ]
     }
   }
